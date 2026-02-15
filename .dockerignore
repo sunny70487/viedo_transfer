@@ -1,0 +1,54 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# Node (dev tools only)
+node_modules/
+package.json
+package-lock.json
+
+# IDE / Editor
+.ace-tool/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker 自身
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# 執行時產生的資料（由 volume 掛載）
+outputs/
+uploads/
+temp/
+tasks_data.json
+whisper_app.log
+nul
+
+# 文件
+*.md
+
+# 本地模型（由 volume 獨立掛載）
+faster-whisper-large-v3-zh-TW/
+
+# Git
+.git/
+.gitignore
+
+# Legacy root-level files (already in backend/ and frontend/)
+/app.py
+/models.py
+/faster_whisper_transcribe.py
+/task_persistence.py
+/subtitle_api.py
+/subtitle_converter.py
+/retranscribe_service.py
+/audio_segment_service.py
+/static/
+/templates/
+/requirements.txt

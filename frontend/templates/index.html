@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-bs-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Whisper 轉錄應用</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="/static/css/themes.css?v=2" rel="stylesheet">
+    <link href="/static/css/style.css?v=2" rel="stylesheet">
+</head>
+<body>
+    <div class="container-fluid">
+        <header class="py-3 mb-4 border-bottom">
+            <div class="container d-flex flex-wrap justify-content-center">
+                <a href="/" class="d-flex align-items-center mb-3 mb-lg-0 me-lg-auto text-decoration-none" style="color: var(--theme-text-primary);">
+                    <i class="bi bi-soundwave fs-4 me-2"></i>
+                    <span class="fs-4">Whisper 轉錄應用</span>
+                </a>
+                <div class="text-end d-flex align-items-center gap-2">
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary dropdown-toggle" type="button" id="theme-dropdown" data-bs-toggle="dropdown" aria-expanded="false" title="主題設定">
+                            <i class="bi bi-palette"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="theme-dropdown">
+                            <li><a class="dropdown-item" href="#" id="theme-light-btn">
+                                <i class="bi bi-sun-fill me-2"></i>淺色模式
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" id="theme-dark-btn">
+                                <i class="bi bi-moon-fill me-2"></i>深色模式
+                            </a></li>
+                            <li><a class="dropdown-item" href="#" id="theme-auto-btn">
+                                <i class="bi bi-circle-half me-2"></i>跟隨系統
+                            </a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" id="theme-settings-btn">
+                                <i class="bi bi-gear me-2"></i>主題設定
+                            </a></li>
+                        </ul>
+                    </div>
+                    <button id="gpu-info-btn" class="btn btn-outline-primary" title="GPU 狀態">
+                        <i class="bi bi-gpu-card"></i><span class="d-none d-md-inline ms-1">GPU 狀態</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="container">
+            <div class="row">
+                <!-- 左側：轉錄選項 -->
+                <div class="col-md-5">
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <ul class="nav nav-tabs card-header-tabs" id="transcription-tabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="url-tab" data-bs-toggle="tab" data-bs-target="#url-panel" type="button" role="tab" aria-controls="url-panel" aria-selected="true">從 URL 轉錄</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload-panel" type="button" role="tab" aria-controls="upload-panel" aria-selected="false">上傳音檔/影片</button>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="card-body">
+                            <div class="tab-content" id="transcription-tab-content">
+                                <!-- URL 轉錄表單 -->
+                                <div class="tab-pane fade show active" id="url-panel" role="tabpanel" aria-labelledby="url-tab">
+                                    <form id="url-form">
+                                        <div class="mb-3">
+                                            <label for="url" class="form-label">URL</label>
+                                            <input type="url" class="form-control" id="url" name="url" placeholder="輸入 YouTube 或其他音檔/影片 URL" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <label for="download-format" class="form-label">下載格式</label>
+                                            <select class="form-select" id="download-format" name="download_format">
+                                                <option value="audio" selected>僅音檔</option>
+                                                <option value="video">影片</option>
+                                                <option value="both">兩者</option>
+                                            </select>
+                                        </div>
+                                        <div class="mb-3" id="video-quality-container" style="display:none;">
+                                            <label for="video-quality" class="form-label">影片畫質</label>
+                                            <select class="form-select" id="video-quality" name="video_quality">
+                                                {% for option in video_quality_options %}
+                                                <option value="{{ option.value }}" {% if option.value == "best" %}selected{% endif %}>{{ option.label }}</option>
+                                                {% endfor %}
+                                            </select>
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">開始轉錄</button>
+                                    </form>
+                                </div>
+                                
+                                <!-- 上傳音檔/影片表單 -->
+                                <div class="tab-pane fade" id="upload-panel" role="tabpanel" aria-labelledby="upload-tab">
+                                    <form id="upload-form" enctype="multipart/form-data">
+                                        <div class="mb-3">
+                                            <label for="audio-file" class="form-label">選擇檔案</label>
+                                            <input type="file" class="form-control" id="audio-file" name="file" accept="audio/*,video/*,.mp3,.wav,.ogg,.flac,.aac,.mp4,.avi,.mov,.mkv,.webm" required>
+                                            <div class="form-text">
+                                                支援的格式：MP3、WAV、OGG、FLAC、AAC、MP4、AVI、MOV、MKV、WEBM
+                                            </div>
+                                        </div>
+                                        <div class="alert alert-info">
+                                            <i class="bi bi-info-circle"></i> 可直接上傳音檔或影片檔案，系統會自動處理並轉錄語音內容。
+                                        </div>
+                                        <button type="submit" class="btn btn-primary">上傳並轉錄</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 轉錄選項 -->
+                    <div class="card mb-4">
+                        <div class="card-header">
+                            <h5 class="card-title mb-0">轉錄選項</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="accordion" id="transcription-options">
+                                <!-- 基本選項 -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="heading-basic">
+                                        <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-basic" aria-expanded="true" aria-controls="collapse-basic">
+                                            基本選項
+                                        </button>
+                                    </h2>
+                                    <div id="collapse-basic" class="accordion-collapse collapse show" aria-labelledby="heading-basic" data-bs-parent="#transcription-options">
+                                        <div class="accordion-body">
+                                            <div class="mb-3">
+                                                <label for="model-size" class="form-label">模型大小</label>
+                                                <select class="form-select" id="model-size" name="model_size">
+                                                    <option value="tiny">Tiny</option>
+                                                    <option value="base">Base</option>
+                                                    <option value="small">Small</option>
+                                                    <option value="medium">Medium</option>
+                                                    <option value="large-v1">Large-v1</option>
+                                                    <option value="large-v2">Large-v2</option>
+                                                    <option value="large-v3">Large-v3</option>
+                                                    <option value="asadfgglie/faster-whisper-large-v3-zh-TW" selected>asadfgglie/faster-whisper-large-v3-zh-TW</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="language" class="form-label">語言 (留空自動檢測)</label>
+                                                <select class="form-select" id="language" name="language">
+                                                    <option value="" selected>自動檢測</option>
+                                                    <option value="zh">中文 (zh)</option>
+                                                    <option value="en">英文 (en)</option>
+                                                    <option value="ja">日文 (ja)</option>
+                                                    <option value="ko">韓文 (ko)</option>
+                                                    <option value="fr">法文 (fr)</option>
+                                                    <option value="de">德文 (de)</option>
+                                                    <option value="es">西班牙文 (es)</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="task" class="form-label">任務</label>
+                                                <select class="form-select" id="task" name="task">
+                                                    <option value="transcribe" selected>轉錄 (原始語言)</option>
+                                                    <option value="translate">翻譯成英文</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="output-format" class="form-label">輸出格式</label>
+                                                <select class="form-select" id="output-format" name="output_format">
+                                                    <option value="txt">純文本 (txt)</option>
+                                                    <option value="srt" selected>字幕 (srt)</option>
+                                                    <option value="vtt">網頁字幕 (vtt)</option>
+                                                    <option value="json">JSON</option>
+                                                    <option value="all">全部格式</option>
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 進階選項 -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="heading-advanced">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-advanced" aria-expanded="false" aria-controls="collapse-advanced">
+                                            進階選項
+                                        </button>
+                                    </h2>
+                                    <div id="collapse-advanced" class="accordion-collapse collapse" aria-labelledby="heading-advanced" data-bs-parent="#transcription-options">
+                                        <div class="accordion-body">
+                                            <div class="mb-3">
+                                                <label for="device" class="form-label">運行設備</label>
+                                                <select class="form-select" id="device" name="device">
+                                                    <option value="auto" selected>自動選擇</option>
+                                                    <option value="cuda">GPU (CUDA)</option>
+                                                    <option value="cpu">CPU</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="compute-type" class="form-label">計算類型</label>
+                                                <select class="form-select" id="compute-type" name="compute_type">
+                                                    <option value="default" selected>默認</option>
+                                                    <option value="float16">float16</option>
+                                                    <option value="int8">int8</option>
+                                                    <option value="int8_float16">int8_float16</option>
+                                                </select>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="beam-size" class="form-label">束搜索大小</label>
+                                                <input type="number" class="form-control" id="beam-size" name="beam_size" value="5" min="1" max="10">
+                                            </div>
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="vad-filter" name="vad_filter" checked>
+                                                <label class="form-check-label" for="vad-filter">
+                                                    使用語音活動檢測 (VAD)
+                                                </label>
+                                            </div>
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="word-timestamps" name="word_timestamps" checked>
+                                                <label class="form-check-label" for="word-timestamps">
+                                                    生成詞級時間戳
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 分割選項 -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="heading-split">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-split" aria-expanded="false" aria-controls="collapse-split">
+                                            音檔分割選項
+                                        </button>
+                                    </h2>
+                                    <div id="collapse-split" class="accordion-collapse collapse" aria-labelledby="heading-split" data-bs-parent="#transcription-options">
+                                        <div class="accordion-body">
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="split-segments" name="split_segments" checked>
+                                                <label class="form-check-label" for="split-segments">
+                                                    將音檔分割為小片段處理
+                                                </label>
+                                            </div>
+                                            <div class="mb-3">
+                                                <label for="segment-duration" class="form-label">片段時長 (秒)</label>
+                                                <input type="number" class="form-control" id="segment-duration" name="segment_duration" value="60" min="10" max="300">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- 輸出選項 -->
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="heading-output">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-output" aria-expanded="false" aria-controls="collapse-output">
+                                            輸出選項
+                                        </button>
+                                    </h2>
+                                    <div id="collapse-output" class="accordion-collapse collapse" aria-labelledby="heading-output" data-bs-parent="#transcription-options">
+                                        <div class="accordion-body">
+                                            <div class="mb-3">
+                                                <label for="output-dir" class="form-label">輸出目錄</label>
+                                                <div class="input-group">
+                                                    <input type="text" class="form-control" id="output-dir" name="output_dir" placeholder="選擇或輸入輸出目錄路徑" readonly>
+                                                    <button class="btn btn-outline-secondary" type="button" id="select-dir-btn">
+                                                        <i class="bi bi-folder2-open"></i> 瀏覽
+                                                    </button>
+                                                </div>
+                                                <div class="form-text">留空則使用默認目錄</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 右側：任務列表和結果 -->
+                <div class="col-md-7">
+                    <div class="card mb-4">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <h5 class="card-title mb-0">任務列表</h5>
+                            <button id="refresh-tasks" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-arrow-clockwise"></i> 刷新
+                            </button>
+                        </div>
+                        <div class="card-body">
+                            <div id="tasks-container">
+                                <div class="text-center py-4 text-muted">
+                                    <i class="bi bi-inbox fs-1"></i>
+                                    <p class="mt-2">尚無任務</p>
+                                    <p class="small">提交 URL 或上傳檔案以開始轉錄</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer class="footer mt-auto py-3" style="background-color: var(--theme-bg-tertiary); border-top: 1px solid var(--theme-border-primary);">
+            <div class="container text-center">
+                <span style="color: var(--theme-text-secondary);">Whisper 轉錄應用 &copy; 2024</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- GPU 信息模態框 -->
+    <div class="modal fade" id="gpu-info-modal" tabindex="-1" aria-labelledby="gpu-info-modal-label" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="gpu-info-modal-label">GPU 狀態</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="gpu-info-content">
+                    <div class="text-center">
+                        <div class="spinner-border" role="status">
+                            <span class="visually-hidden">載入中...</span>
+                        </div>
+                        <p class="mt-2">正在獲取 GPU 信息...</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 目錄選擇模態框 -->
+    <div class="modal fade" id="directory-picker-modal" tabindex="-1" aria-labelledby="directory-picker-modal-label" aria-hidden="true">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="directory-picker-modal-label">
+                        <i class="bi bi-folder2-open directory-mode-icon"></i>
+                        <span class="modal-title-text">選擇輸出目錄</span>
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- 目錄樹 -->
+                        <div class="col-md-4">
+                            <div class="list-group" id="directory-tree">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">載入中...</span>
+                                    </div>
+                                    <p class="mt-2">載入目錄...</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 子目錄列表 -->
+                        <div class="col-md-8">
+                            <div class="picker-mode-hint directory-mode-hint">
+                                <i class="bi bi-info-circle"></i> 請選擇一個輸出目錄。
+                            </div>
+                            
+                            <nav aria-label="breadcrumb">
+                                <ol class="breadcrumb" id="directory-breadcrumb">
+                                    <li class="breadcrumb-item active" aria-current="page">根目錄</li>
+                                </ol>
+                            </nav>
+                            
+                            <div id="subdirectories-container">
+                                <div class="text-center py-3">
+                                    <p>請從左側選擇一個目錄</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 當前選擇的目錄 -->
+                    <div class="mt-3">
+                        <label for="selected-directory" class="form-label">當前選擇的路徑</label>
+                        <input type="text" class="form-control" id="selected-directory" readonly>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" id="confirm-directory-btn">確認選擇</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任務模板 -->
+    <template id="task-template">
+        <div class="task-item card mb-3" data-task-id="">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="card-title mb-0 task-id"></h6>
+                    <span class="badge task-status"></span>
+                </div>
+                <p class="card-text task-message"></p>
+                <div class="progress-container mb-2">
+                    <div class="progress" style="height: 8px;">
+                        <div class="progress-bar" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                    </div>
+                    <div class="d-flex justify-content-end">
+                        <small class="text-muted progress-text">0%</small>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <small class="text-muted task-time"></small>
+                    <div class="task-actions d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-danger task-delete-btn" style="display: none;" title="刪除任務">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary task-details-btn">詳情</button>
+                    </div>
+                </div>
+            </div>
+            <div class="task-details-inline">
+                <div class="card-body">
+                    <!-- Detail content injected by JS -->
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- 任務詳情模板 -->
+    <template id="task-details-template">
+        <div class="task-details">
+            <div class="mb-3">
+                <h6>任務 ID</h6>
+                <p class="task-id"></p>
+            </div>
+            <div class="mb-3">
+                <h6>狀態</h6>
+                <p><span class="badge task-status"></span></p>
+            </div>
+            <div class="mb-3">
+                <h6>消息</h6>
+                <p class="task-message"></p>
+            </div>
+            <div class="mb-3">
+                <h6>開始時間</h6>
+                <p class="task-start-time"></p>
+            </div>
+            <div class="mb-3 task-end-time-container">
+                <h6>完成時間</h6>
+                <p class="task-end-time"></p>
+            </div>
+            <div class="mb-3 task-duration-container">
+                <h6>處理時間</h6>
+                <p class="task-duration"></p>
+            </div>
+            <div class="mb-3 task-error-container" style="display: none;">
+                <h6>錯誤</h6>
+                <div class="alert alert-danger task-error"></div>
+            </div>
+            <div class="mb-3 task-results-container" style="display: none;">
+                <h6>結果文件</h6>
+                <div class="list-group task-results">
+                    <!-- 結果文件列表 -->
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/js/theme-manager.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.themeManager) {
+                const currentTheme = window.themeManager.getCurrentTheme() || 'light';
+                const root = document.documentElement;
+                root.setAttribute('data-bs-theme', currentTheme);
+                root.classList.remove('theme-light', 'theme-dark');
+                root.classList.add(`theme-${currentTheme}`);
+            }
+        });
+    </script>
+    <script src="/static/js/theme-settings.js"></script>
+    <script src="/static/js/main.js?v=2"></script>
+    <script>
+        // 主題設定按鈕事件
+        document.addEventListener('DOMContentLoaded', function() {
+            // 主題快速切換按鈕
+            document.getElementById('theme-light-btn')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.themeManager?.setTheme('light');
+            });
+            
+            document.getElementById('theme-dark-btn')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.themeManager?.setTheme('dark');
+            });
+            
+            document.getElementById('theme-auto-btn')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (window.themeManager) {
+                    window.themeManager.options.autoDetect = true;
+                    window.themeManager.setTheme(window.themeManager.systemTheme);
+                }
+            });
+            
+            // 主題設定按鈕
+            document.getElementById('theme-settings-btn')?.addEventListener('click', (e) => {
+                e.preventDefault();
+                window.themeSettings?.show();
+            });
+        });
+    </script>
+</body>
+</html> 

@@ -1,0 +1,44 @@
+# IDE / Editor
+.ace-tool/
+.vscode/
+.idea/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.ruff_cache/
+
+# Node (dev tools only)
+node_modules/
+package.json
+package-lock.json
+
+# Runtime data
+outputs/
+uploads/
+temp/
+tasks_data.json
+whisper_app.log
+nul
+
+# Models (large binary files)
+faster-whisper-large-v3-zh-TW/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Legacy root-level files (migrated to backend/ and frontend/)
+# Keep these entries to prevent accidental re-creation at root
+/app.py
+/models.py
+/faster_whisper_transcribe.py
+/task_persistence.py
+/subtitle_api.py
+/subtitle_converter.py
+/retranscribe_service.py
+/audio_segment_service.py
+/static/
+/templates/

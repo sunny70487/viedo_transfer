@@ -1,0 +1,42 @@
+services:
+  whisper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: whisper-transfer
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      # 轉錄輸出持久化
+      - ./outputs:/app/outputs
+      # 上傳檔案暫存
+      - ./uploads:/app/uploads
+      # 任務記錄持久化
+      - ./tasks_data.json:/app/tasks_data.json
+      # 模型快取（避免每次重啟重新下載）
+      - whisper-models:/app/models
+      # 若有本地微調模型，掛載進容器
+      - ./faster-whisper-large-v3-zh-TW:/app/faster-whisper-large-v3-zh-TW:ro
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # ---- GPU 配置 ----
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all        # 使用所有 GPU；可改為 1 限制單卡
+              capabilities: [gpu]
+    # 加大 shared memory 以支援 PyTorch DataLoader / CUDA
+    shm_size: "2gb"
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+volumes:
+  whisper-models:
+    name: whisper-model-cache
