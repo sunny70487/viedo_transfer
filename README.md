@@ -1,28 +1,58 @@
-# Faster Whisper 轉錄工具
+# Whisper Transfer — 語音轉錄工具
 
-基於 FastAPI 和 Faster Whisper 的影片/音頻轉錄 Web 應用，支援多執行緒處理，可從 URL 下載或上傳本地音頻/影片檔案進行自動轉錄。
+基於 **FastAPI** 和 **FunASR** 的影片/音頻轉錄 Web 應用，支援多執行緒處理，可從 URL 下載或上傳本地音頻/影片檔案進行自動轉錄。
 
 ## 功能特點
 
-- 美觀的 Web 界面，支援響應式設計與深色模式
+- 美觀的 Web 界面，支援響應式設計與深色模式（多主題切換）
 - 支援從 URL（YouTube、Bilibili 等）下載音頻/影片並轉錄
 - 支援上傳本地音頻/影片檔案進行轉錄
 - 多執行緒處理，不阻塞主執行緒
-- 即時任務狀態更新
+- 即時任務狀態更新與任務持久化（重啟不遺失）
 - 多種輸出格式（txt, srt, vtt, json, ass, ssa）
-- 多種 Whisper 模型大小（tiny 到 large-v3）
+- 多種 ASR 模型支援（Paraformer、SenseVoice、Whisper、Fun-ASR-Nano）
 - 自動語言檢測或指定語言
+- 簡體中文自動轉繁體中文（OpenCC）
 - GPU 加速轉錄（CUDA）
 - 音頻分割處理大檔案
-- 字幕編輯器（支援影片同步播放、搜尋、匯出）
+- 字幕編輯器（支援影片同步播放、搜尋、匯出、分割、合併）
+- 選定片段重新轉錄（retranscribe）
 - 影片自動轉換為 MP4（H.264 + AAC）以確保瀏覽器相容性
 - Docker 部署支援（含 GPU）
+
+## 專案結構
+
+```
+whisper_transfer/
+├── backend/
+│   ├── app.py                      # FastAPI 主應用
+│   ├── funasr_transcribe.py        # FunASR 轉錄引擎
+│   ├── faster_whisper_transcribe.py # Faster Whisper 轉錄引擎（備用）
+│   ├── models.py                   # Pydantic 資料模型
+│   ├── task_persistence.py         # 任務持久化
+│   ├── requirements.txt            # Python 依賴
+│   └── services/
+│       ├── audio_segment_service.py  # 音頻分割服務
+│       ├── retranscribe_service.py   # 重新轉錄服務
+│       ├── subtitle_api.py           # 字幕 API
+│       └── subtitle_converter.py     # 字幕格式轉換
+├── frontend/
+│   ├── templates/
+│   │   ├── index.html              # 主頁面
+│   │   └── subtitle_editor.html    # 字幕編輯器
+│   └── static/
+│       ├── css/                    # 樣式（含主題）
+│       └── js/                     # 前端邏輯
+├── docker-compose.yml
+├── Dockerfile
+└── README.md
+```
 
 ## 安裝
 
 ### 系統需求
 
-- Python 3.8 或更高版本
+- Python 3.11 或更高版本
 - FFmpeg（用於音頻提取和影片轉換）
 - 推薦使用 CUDA 相容的 NVIDIA GPU 以獲得更好的效能
 
@@ -31,72 +61,93 @@
 ```bash
 git clone <repository-url>
 cd whisper_transfer
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 ```
 
-### Docker 部署
+### Docker 部署（推薦）
+
+需要 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 以啟用 GPU 支援。
 
 ```bash
 docker-compose up -d
 ```
+
+Docker 配置說明：
+- 基於 `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`
+- 自動掛載 `outputs/`、`uploads/`、`tasks_data.json` 至容器，資料不遺失
+- 模型快取使用 Docker Volume（`whisper-model-cache`），避免每次重啟重新下載
+- 可掛載本地微調模型目錄（如 `faster-whisper-large-v3-zh-TW/`）
+- 內建健康檢查（每 30 秒）
 
 ## 使用方法
 
 ### Web 界面（推薦）
 
 ```bash
-python app.py
+# 本地開發
+python -m uvicorn backend.app:app --host 0.0.0.0 --port 5000
+
+# 或使用 Docker
+docker-compose up -d
 ```
 
 應用將在 http://localhost:5000 啟動。
 
 1. 打開瀏覽器訪問 http://localhost:5000
 2. 選擇從 URL 轉錄或上傳音頻/影片檔案
-3. 設定轉錄選項（模型大小、語言、輸出格式等）
+3. 設定轉錄選項（模型、語言、輸出格式等）
 4. 提交任務
 5. 在任務列表中查看進度和結果
-6. 完成後可下載轉錄結果或進入字幕編輯器
-
-### 命令列模式
-
-```bash
-# 下載並轉錄 YouTube 影片
-python faster_whisper_transcribe.py --url "https://www.youtube.com/watch?v=example"
-
-# 指定輸出格式
-python faster_whisper_transcribe.py --url "https://www.youtube.com/watch?v=example" --output_format all
-
-# 使用較小的模型提高速度
-python faster_whisper_transcribe.py --url "https://www.youtube.com/watch?v=example" --model small
-
-# 查看所有可用選項
-python faster_whisper_transcribe.py --help
-```
+6. 完成後可下載轉錄結果或進入字幕編輯器進行編輯
 
 ## 轉錄選項說明
 
+### 模型選擇
+
+| 模型名稱 | 引擎 | 特點 |
+|---------|------|------|
+| `paraformer-zh` | FunASR Paraformer | 中文最佳精度，推薦中文場景 |
+| `sensevoice` | FunASR SenseVoice | 多語言 + 情感辨識 |
+| `large-v3` | FunASR Whisper wrapper | Whisper large-v3，多語言通用 |
+| `large-v3-turbo` | FunASR Whisper wrapper | Whisper large-v3-turbo，速度更快 |
+| `fun-asr-nano` | FunASR Nano | 輕量級模型 |
+
+> 舊版 Faster Whisper 模型名稱（tiny, base, small, medium 等）會自動對應到 FunASR 模型。
+
 ### 基本選項
 
-- **模型大小**：tiny, base, small, medium, large-v1, large-v2, large-v3
 - **語言**：指定音頻語言，留空則自動檢測
 - **任務**：轉錄（保持原始語言）或翻譯成英文
-- **輸出格式**：txt, srt, vtt, json, all
+- **輸出格式**：txt, srt, vtt, json, ass, ssa
+- **下載格式**：僅音頻 / 含影片
 
 ### 進階選項
 
-- **運行設備**：CPU 或 GPU
+- **運行設備**：自動 / CPU / GPU
 - **計算類型**：float16, int8 等
 - **束搜索大小**：影響準確性和速度
 - **語音活動檢測（VAD）**：過濾無聲片段
 - **詞級時間戳**：生成逐詞時間標記
 - **音頻分割**：將長音頻分割為小片段處理
 
+## 字幕編輯器
+
+轉錄完成後，可進入內建字幕編輯器：
+
+- 影片同步播放，點擊字幕即跳轉對應時間
+- 編輯字幕文字與時間戳
+- 分割 / 合併字幕段落
+- 選定片段重新轉錄（使用不同模型參數）
+- 搜尋字幕內容（支援正規表達式）
+- 匯出為多種格式（srt, vtt, txt, json, ass, ssa）
+
 ## 注意事項
 
-- 大型模型（large-v3）提供最佳轉錄品質，但需要更多時間和記憶體
+- `paraformer-zh` 模型在中文場景下品質最佳，推薦優先使用
 - GPU 轉錄速度遠快於 CPU
 - 轉錄長影片時，建議啟用分割處理選項
 - 非 MP4 格式的影片會自動轉換為 MP4 以確保瀏覽器播放相容性
+- 任務資料會自動持久化至 `tasks_data.json`，重啟後自動恢復
 
 ## 授權
 
