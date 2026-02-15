@@ -83,7 +83,12 @@ class VideoInfo(BaseModel):
 class SubtitleMetadata(BaseModel):
     """字幕元資料模型"""
 
-    language: str = Field(default="unknown", description="語言代碼")
+    language: Optional[str] = Field(default="unknown", description="語言代碼")
+
+    @validator("language", pre=True, always=True)
+    def language_must_not_be_none(cls, v):
+        return v if v is not None else "unknown"
+
     model_used: Optional[str] = Field(None, description="使用的 Whisper 模型")
     created_at: float = Field(default_factory=time.time, description="創建時間戳")
     last_modified: float = Field(

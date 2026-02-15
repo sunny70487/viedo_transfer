@@ -22,8 +22,8 @@ from pydantic import BaseModel
 import shutil
 import json
 
-# 導入轉錄模組
-from backend.faster_whisper_transcribe import (
+# 導入轉錄模組（FunASR engine）
+from backend.funasr_transcribe import (
     transcribe_audio,
     download_from_url,
     check_gpu,
@@ -654,9 +654,13 @@ async def download_result(task_id: str, file_type: str, request: Request):
 
     # 統一使用 FileResponse（Starlette 的 FileResponse 已內建 HTTP Range 支持，
     # 能正確處理影片的 seek/暫停/拖動，避免自訂 StreamingResponse 導致的黑屏問題）
-    logger.info(f"提供檔案: {file_path}, media_type: {media_type}")
+    download_filename = os.path.basename(file_path)
+    logger.info(
+        f"提供檔案: {file_path}, filename: {download_filename}, media_type: {media_type}"
+    )
     return FileResponse(
         path=file_path,
+        filename=download_filename,
         media_type=media_type,
         headers={
             "Accept-Ranges": "bytes",

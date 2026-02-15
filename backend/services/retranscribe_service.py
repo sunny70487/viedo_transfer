@@ -21,7 +21,7 @@ from backend.services.audio_segment_service import (
     AudioSegmentService,
     AudioSegmentRequest,
 )
-from backend.faster_whisper_transcribe import transcribe_audio
+from backend.funasr_transcribe import transcribe_audio
 
 # 設置日誌
 logger = logging.getLogger("retranscribe_service")

@@ -169,9 +169,6 @@
                                         <i class="bi bi-skip-forward"></i>
                                     </button>
                                 </div>
-                                <button type="button" class="btn btn-outline-secondary btn-sm cc-toggle-btn active" id="cc-toggle-btn" title="開啟/關閉字幕">
-                                    <i class="bi bi-badge-cc-fill"></i>
-                                </button>
                             </div>
                         </div>
                         <div class="card-body p-0">
@@ -203,16 +200,21 @@
                                         <i class="bi bi-volume-up" style="font-size: 0.85rem;"></i>
                                         <input type="range" class="form-range" id="volume-control" min="0" max="100" value="100" style="width: 90px;">
                                     </div>
-                                    <div class="d-flex align-items-center gap-2">
-                                        <label for="playback-speed" class="form-label mb-0 text-secondary" style="font-size: 0.78rem;">速度</label>
-                                        <select id="playback-speed" class="form-select form-select-sm" style="width: auto;">
-                                            <option value="0.5">0.5x</option>
-                                            <option value="0.75">0.75x</option>
-                                            <option value="1" selected>1x</option>
-                                            <option value="1.25">1.25x</option>
-                                            <option value="1.5">1.5x</option>
-                                            <option value="2">2x</option>
-                                        </select>
+                                    <div class="d-flex align-items-center gap-3">
+                                        <button type="button" class="cc-toggle-btn active" id="cc-toggle-btn" title="開啟/關閉字幕">
+                                            <i class="bi bi-badge-cc-fill"></i>
+                                        </button>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <label for="playback-speed" class="form-label mb-0 text-secondary" style="font-size: 0.78rem;">速度</label>
+                                            <select id="playback-speed" class="form-select form-select-sm" style="width: auto;">
+                                                <option value="0.5">0.5x</option>
+                                                <option value="0.75">0.75x</option>
+                                                <option value="1" selected>1x</option>
+                                                <option value="1.25">1.25x</option>
+                                                <option value="1.5">1.5x</option>
+                                                <option value="2">2x</option>
+                                            </select>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -424,8 +426,8 @@
                             <button type="button" class="btn btn-outline-secondary merge-btn" title="合併">
                                 <i class="bi bi-union"></i>
                             </button>
-                            <button type="button" class="btn btn-outline-warning retranscribe-btn" title="重新轉錄">
-                                <i class="bi bi-arrow-repeat"></i>
+                            <button type="button" class="btn btn-outline-danger delete-btn" title="刪除">
+                                <i class="bi bi-trash"></i>
                             </button>
                             <button type="button" class="btn btn-outline-primary edit-btn" title="編輯">
                                 <i class="bi bi-pencil"></i>

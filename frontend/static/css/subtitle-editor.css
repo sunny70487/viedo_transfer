@@ -249,28 +249,36 @@ button, .btn, a, input, select, textarea,
     border-color: var(--theme-gray-500, var(--theme-border-accent));
 }
 
-/* CC (subtitle toggle) button */
+/* CC (subtitle toggle) button — inline icon style like YouTube */
 .cc-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    font-size: 1.1rem;
     color: var(--theme-text-muted);
-    border-color: var(--theme-border-accent);
-    transition: all 0.2s ease;
-    position: relative;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: color 0.2s ease, border-color 0.2s ease;
+    line-height: 1;
 }
 
 .cc-toggle-btn:hover {
-    background-color: var(--theme-bg-tertiary);
-    border-color: var(--theme-gray-500, var(--theme-border-accent));
+    color: var(--theme-text-primary);
 }
 
 .cc-toggle-btn.active {
     color: #f59e0b;
-    border-color: #f59e0b;
-    background-color: rgba(245, 158, 11, 0.1);
+    border-bottom-color: #f59e0b;
 }
 
 .cc-toggle-btn.active:hover {
-    background-color: rgba(245, 158, 11, 0.2);
-    border-color: #f59e0b;
+    color: #fbbf24;
+    border-bottom-color: #fbbf24;
 }
 
 /* ================================================================

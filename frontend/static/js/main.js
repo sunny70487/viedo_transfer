@@ -787,7 +787,8 @@ function renderTaskDetails(task) {
         // 文件列表
         const typeNames = {
             txt: '純文本 (TXT)', srt: '字幕 (SRT)', vtt: '網頁字幕 (VTT)',
-            json: '詳細數據 (JSON)', segments_txt: '分段文本 (TXT)'
+            json: '詳細數據 (JSON)', segments_txt: '分段文本 (TXT)',
+            video: '影片 (MP4)'
         };
         Object.entries(task.result.files).forEach(([type, path]) => {
             const typeName = typeNames[type] || type;

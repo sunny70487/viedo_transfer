@@ -1153,7 +1153,7 @@ class SubtitleEditor {
         const editBtn = element.querySelector('.edit-btn');
         const splitBtn = element.querySelector('.split-btn');
         const mergeBtn = element.querySelector('.merge-btn');
-        const retranscribeBtn = element.querySelector('.retranscribe-btn');
+        const deleteBtn = element.querySelector('.delete-btn');
         
         editBtn.onclick = () => this.editSubtitle(index);
         splitBtn.onclick = (e) => {
@@ -1164,9 +1164,9 @@ class SubtitleEditor {
             e.stopPropagation();
             this.mergeSubtitle(index);
         };
-        retranscribeBtn.onclick = (e) => {
+        deleteBtn.onclick = (e) => {
             e.stopPropagation();
-            this.retranscribeSubtitle(index);
+            this.deleteSubtitle(index);
         };
         
         // 點擊跳轉到對應時間
@@ -1431,32 +1431,48 @@ class SubtitleEditor {
     }
     
     /**
-     * 重新轉錄字幕
+     * 刪除字幕
      */
-    retranscribeSubtitle(index) {
+    deleteSubtitle(index) {
         if (index < 0 || index >= this.subtitles.length) return;
         
-        if (!this.retranscribeManager) {
-            this.showError('重新轉錄功能不可用');
-            return;
+        if (!confirm('確定要刪除這個字幕嗎？')) return;
+        
+        // 取得被刪除字幕的時間範圍
+        const deleted = this.subtitles[index];
+        const deletedStart = deleted.start_time;
+        const deletedEnd = deleted.end_time;
+        const gap = deletedEnd - deletedStart;
+        
+        // 移除字幕
+        this.subtitles.splice(index, 1);
+        
+        // 重新計算後續字幕的時間（將被刪除片段的時間間隔扣除）
+        for (let i = index; i < this.subtitles.length; i++) {
+            this.subtitles[i].start_time = Math.max(0, this.subtitles[i].start_time - gap);
+            this.subtitles[i].end_time = Math.max(0, this.subtitles[i].end_time - gap);
+            // 更新詞級時間戳
+            if (this.subtitles[i].words) {
+                for (const w of this.subtitles[i].words) {
+                    w.start = Math.max(0, w.start - gap);
+                    w.end = Math.max(0, w.end - gap);
+                }
+            }
         }
         
-        const subtitle = this.subtitles[index];
+        // 重新索引
+        this.subtitles.forEach((subtitle, idx) => {
+            subtitle.index = idx;
+        });
         
-        // 檢查字幕片段長度
-        const duration = subtitle.end_time - subtitle.start_time;
-        if (duration < 0.5) {
-            this.showError('字幕片段太短，無法重新轉錄（最少需要0.5秒）');
-            return;
-        }
+        this.addToHistory();
+        this.renderSubtitleList();
+        this.markDirty();
         
-        if (duration > 300) {
-            this.showError('字幕片段太長，無法重新轉錄（最多300秒）');
-            return;
-        }
+        // 同步更新影片字幕
+        this.syncVideoSubtitles();
         
-        // 顯示重新轉錄對話框
-        this.retranscribeManager.showRetranscribeDialog(index, subtitle);
+        this.showSuccess('字幕已刪除');
     }
     
     /**

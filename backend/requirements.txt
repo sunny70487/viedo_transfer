@@ -8,9 +8,12 @@ aiofiles>=23.1.0
 # 系統相關依賴
 pywin32>=305; platform_system=="Windows"
 
-# Whisper 轉錄依賴
-faster-whisper>=0.10.0
+# FunASR 轉錄依賴
+funasr>=1.0.0
+modelscope>=1.9.0
 torch>=2.0.0
+torchaudio>=2.0.0
+opencc-python-reimplemented>=0.1.7
 numpy>=1.22.0
 pathlib>=1.0.1
 tqdm>=4.64.0
