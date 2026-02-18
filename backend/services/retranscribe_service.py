@@ -21,7 +21,35 @@ from backend.services.audio_segment_service import (
     AudioSegmentService,
     AudioSegmentRequest,
 )
-from backend.funasr_transcribe import transcribe_audio
+from backend.qwen3_asr_transcribe import transcribe_audio as _qwen3_transcribe
+from backend.funasr_transcribe import transcribe_audio as _funasr_transcribe
+
+# FunASR 專屬模型名稱
+_FUNASR_MODEL_NAMES = {
+    "paraformer-zh",
+    "paraformer",
+    "sensevoice",
+    "SenseVoiceSmall",
+    "iic/SenseVoiceSmall",
+    "large-v3",
+    "whisper-large-v3",
+    "Whisper-large-v3",
+    "large-v3-turbo",
+    "whisper-large-v3-turbo",
+    "Whisper-large-v3-turbo",
+    "fun-asr-nano",
+    "nano",
+    "FunAudioLLM/Fun-ASR-Nano-2512",
+}
+
+
+def transcribe_audio(**kwargs):
+    """根據 model_size 自動路由到 Qwen3-ASR 或 FunASR 引擎"""
+    model_size = kwargs.get("model_size", "qwen3-asr-1.7b")
+    if model_size in _FUNASR_MODEL_NAMES:
+        return _funasr_transcribe(**kwargs)
+    return _qwen3_transcribe(**kwargs)
+
 
 # 設置日誌
 logger = logging.getLogger("retranscribe_service")
@@ -213,7 +241,7 @@ class RetranscribeService:
             model_settings = task.request.model_settings or {}
 
             # 設置預設值
-            model_size = model_settings.get("model_size", "large-v3")
+            model_size = model_settings.get("model_size", "qwen3-asr-1.7b")
             device = model_settings.get("device", "auto")
             compute_type = model_settings.get("compute_type", "default")
             language = model_settings.get("language", None)

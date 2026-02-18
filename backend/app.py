@@ -22,12 +22,37 @@ from pydantic import BaseModel
 import shutil
 import json
 
-# 導入轉錄模組（FunASR engine）
-from backend.funasr_transcribe import (
-    transcribe_audio,
-    download_from_url,
-    check_gpu,
-)
+# 導入轉錄模組（雙引擎：Qwen3-ASR + FunASR）
+from backend.qwen3_asr_transcribe import transcribe_audio as _qwen3_transcribe
+from backend.funasr_transcribe import transcribe_audio as _funasr_transcribe
+from backend.funasr_transcribe import download_from_url, check_gpu
+
+# FunASR 專屬模型名稱（選到這些時走 FunASR 引擎）
+_FUNASR_MODEL_NAMES = {
+    "paraformer-zh",
+    "paraformer",
+    "sensevoice",
+    "SenseVoiceSmall",
+    "iic/SenseVoiceSmall",
+    "large-v3",
+    "whisper-large-v3",
+    "Whisper-large-v3",
+    "large-v3-turbo",
+    "whisper-large-v3-turbo",
+    "Whisper-large-v3-turbo",
+    "fun-asr-nano",
+    "nano",
+    "FunAudioLLM/Fun-ASR-Nano-2512",
+}
+
+
+def transcribe_audio(**kwargs):
+    """根據 model_size 自動路由到 Qwen3-ASR 或 FunASR 引擎"""
+    model_size = kwargs.get("model_size", "qwen3-asr-1.7b")
+    if model_size in _FUNASR_MODEL_NAMES:
+        return _funasr_transcribe(**kwargs)
+    return _qwen3_transcribe(**kwargs)
+
 
 # 導入任務持久化模組
 from backend.task_persistence import TaskPersistence
@@ -47,7 +72,7 @@ logger = logging.getLogger("whisper_app")
 
 # 創建 FastAPI 應用
 app = FastAPI(
-    title="Whisper 轉錄應用", description="使用 Faster Whisper 進行音頻轉錄的 Web 應用"
+    title="Whisper 轉錄應用", description="使用 Qwen3-ASR 進行音頻轉錄的 Web 應用"
 )
 
 # 設置靜態文件和模板（前端檔案位於 frontend/ 目錄下）
@@ -131,7 +156,7 @@ logger.info(f"任務數據初始化完成，共載入 {len(tasks)} 個任務")
 # 轉錄請求模型
 class TranscriptionRequest(BaseModel):
     url: Optional[str] = None
-    model_size: str = "large-v3"
+    model_size: str = "qwen3-asr-1.7b"
     device: str = "auto"
     compute_type: str = "default"
     language: Optional[str] = None

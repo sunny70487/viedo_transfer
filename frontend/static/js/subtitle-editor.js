@@ -1487,6 +1487,36 @@ class SubtitleEditor {
     }
     
     /**
+     * 導航到有錯誤的字幕並以紅色高亮顯示
+     * 用於儲存驗證失敗時，引導使用者定位問題字幕
+     */
+    navigateToErrorSubtitle(subtitleIndex) {
+        if (subtitleIndex < 0 || subtitleIndex >= this.subtitles.length) return;
+        
+        // 清除搜尋過濾，確保目標字幕可見
+        if (this.searchTerm) {
+            this.clearSearch();
+        }
+        
+        // 捲動到目標字幕並設為當前高亮
+        this.setCurrentSubtitle(subtitleIndex);
+        
+        // 延遲添加錯誤高亮樣式（等待虛擬捲動渲染完成）
+        setTimeout(() => {
+            const element = this.subtitleList?.querySelector(`[data-index="${subtitleIndex}"]`);
+            if (element) {
+                element.classList.remove('current');
+                element.classList.add('error-highlight');
+                
+                // 動畫結束後移除錯誤高亮
+                setTimeout(() => {
+                    element.classList.remove('error-highlight');
+                }, 4000);
+            }
+        }, 150);
+    }
+    
+    /**
      * 新增字幕
      */
     addNewSubtitle() {
@@ -1627,6 +1657,23 @@ class SubtitleEditor {
                 console.log('[SubtitleEditor] 影片字幕已更新');
             }
             
+            // 儲存前自動鉗位：將超出字幕範圍的詞級時間戳修正到合法範圍
+            for (const subtitle of this.subtitles) {
+                if (subtitle.words && Array.isArray(subtitle.words)) {
+                    for (const word of subtitle.words) {
+                        if (word.start < subtitle.start_time || word.end > subtitle.end_time) {
+                            console.warn(
+                                `[SaveClamp] 詞語 "${word.word}" (${word.start.toFixed(3)}-${word.end.toFixed(3)}) ` +
+                                `超出字幕 ${subtitle.index} 範圍 (${subtitle.start_time.toFixed(3)}-${subtitle.end_time.toFixed(3)})，已鉗位`
+                            );
+                            word.start = Math.max(word.start, subtitle.start_time);
+                            word.end = Math.min(word.end, subtitle.end_time);
+                            if (word.start > word.end) word.start = word.end;
+                        }
+                    }
+                }
+            }
+            
             // 準備字幕資料（帶回原始 metadata，更新 last_modified）
             const metadata = Object.assign({}, this.metadata || {}, {
                 last_modified: Date.now() / 1000
@@ -1646,19 +1693,44 @@ class SubtitleEditor {
             });
             
             if (!response.ok) {
-                const error = await response.json();
+                const errorData = await response.json();
                 // FastAPI 422 returns {detail: [...]}, other errors may use {error: "..."}
                 let errorMsg = '儲存失敗';
-                if (error.detail) {
-                    if (Array.isArray(error.detail)) {
-                        errorMsg = error.detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+                let errorSubtitleIndices = [];
+                
+                if (errorData.detail) {
+                    if (Array.isArray(errorData.detail)) {
+                        errorMsg = errorData.detail.map(d => d.msg || JSON.stringify(d)).join('; ');
+                        
+                        // 從驗證錯誤的 loc 路徑中提取字幕索引
+                        // loc 格式: ["body", "subtitles", <index>, ...]
+                        for (const d of errorData.detail) {
+                            if (d.loc && Array.isArray(d.loc)) {
+                                const subtitlesFieldIdx = d.loc.indexOf('subtitles');
+                                if (subtitlesFieldIdx >= 0 && subtitlesFieldIdx + 1 < d.loc.length) {
+                                    const idx = parseInt(d.loc[subtitlesFieldIdx + 1]);
+                                    if (!isNaN(idx) && !errorSubtitleIndices.includes(idx)) {
+                                        errorSubtitleIndices.push(idx);
+                                    }
+                                }
+                            }
+                        }
                     } else {
-                        errorMsg = String(error.detail);
+                        errorMsg = String(errorData.detail);
                     }
-                } else if (error.error) {
-                    errorMsg = error.error;
+                } else if (errorData.error) {
+                    errorMsg = errorData.error;
                 }
-                throw new Error(errorMsg);
+                
+                this.hideLoading();
+                console.error('儲存字幕驗證錯誤:', errorMsg, '相關字幕索引:', errorSubtitleIndices);
+                this.showError(`儲存字幕失敗: ${errorMsg}`);
+                
+                // 導航到第一個有錯誤的字幕
+                if (errorSubtitleIndices.length > 0) {
+                    this.navigateToErrorSubtitle(errorSubtitleIndices[0]);
+                }
+                return;
             }
             
             const result = await response.json();

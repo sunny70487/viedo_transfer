@@ -1,6 +1,6 @@
 # Whisper Transfer — 語音轉錄工具
 
-基於 **FastAPI** 和 **FunASR** 的影片/音頻轉錄 Web 應用，支援多執行緒處理，可從 URL 下載或上傳本地音頻/影片檔案進行自動轉錄。
+基於 **FastAPI** 和 **Qwen3-ASR** 的影片/音頻轉錄 Web 應用，支援多執行緒處理，可從 URL 下載或上傳本地音頻/影片檔案進行自動轉錄。
 
 ## 功能特點
 
@@ -10,7 +10,7 @@
 - 多執行緒處理，不阻塞主執行緒
 - 即時任務狀態更新與任務持久化（重啟不遺失）
 - 多種輸出格式（txt, srt, vtt, json, ass, ssa）
-- 多種 ASR 模型支援（Paraformer、SenseVoice、Whisper、Fun-ASR-Nano）
+- 多種 ASR 模型支援（Qwen3-ASR-1.7B、Qwen3-ASR-0.6B；舊版 FunASR 名稱自動對應）
 - 自動語言檢測或指定語言
 - 簡體中文自動轉繁體中文（OpenCC）
 - GPU 加速轉錄（CUDA）
@@ -26,7 +26,8 @@
 whisper_transfer/
 ├── backend/
 │   ├── app.py                      # FastAPI 主應用
-│   ├── funasr_transcribe.py        # FunASR 轉錄引擎
+│   ├── qwen3_asr_transcribe.py     # Qwen3-ASR 轉錄引擎（主要）
+│   ├── funasr_transcribe.py        # FunASR 轉錄引擎（備用 / 工具函數）
 │   ├── faster_whisper_transcribe.py # Faster Whisper 轉錄引擎（備用）
 │   ├── models.py                   # Pydantic 資料模型
 │   ├── task_persistence.py         # 任務持久化
@@ -106,13 +107,10 @@ docker-compose up -d
 
 | 模型名稱 | 引擎 | 特點 |
 |---------|------|------|
-| `paraformer-zh` | FunASR Paraformer | 中文最佳精度，推薦中文場景 |
-| `sensevoice` | FunASR SenseVoice | 多語言 + 情感辨識 |
-| `large-v3` | FunASR Whisper wrapper | Whisper large-v3，多語言通用 |
-| `large-v3-turbo` | FunASR Whisper wrapper | Whisper large-v3-turbo，速度更快 |
-| `fun-asr-nano` | FunASR Nano | 輕量級模型 |
+| `qwen3-asr-1.7b` | Qwen3-ASR | SOTA 精度，多語言，推薦 |
+| `qwen3-asr-0.6b` | Qwen3-ASR | 輕量快速，適合低資源環境 |
 
-> 舊版 Faster Whisper 模型名稱（tiny, base, small, medium 等）會自動對應到 FunASR 模型。
+> 舊版 FunASR / Faster Whisper 模型名稱（paraformer-zh, sensevoice, large-v3, tiny, base, small, medium 等）會自動對應到 Qwen3-ASR 模型。
 
 ### 基本選項
 
@@ -143,7 +141,7 @@ docker-compose up -d
 
 ## 注意事項
 
-- `paraformer-zh` 模型在中文場景下品質最佳，推薦優先使用
+- `qwen3-asr-1.7b` 模型在多語言場景下品質最佳（SOTA），推薦優先使用
 - GPU 轉錄速度遠快於 CPU
 - 轉錄長影片時，建議啟用分割處理選項
 - 非 MP4 格式的影片會自動轉換為 MP4 以確保瀏覽器播放相容性

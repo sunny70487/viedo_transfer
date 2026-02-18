@@ -8,9 +8,10 @@ aiofiles>=23.1.0
 # 系統相關依賴
 pywin32>=305; platform_system=="Windows"
 
-# FunASR 轉錄依賴
+# Qwen3-ASR 轉錄依賴（同時保留 FunASR 作為備用）
 funasr>=1.0.0
 modelscope>=1.9.0
+qwen-asr>=0.0.6
 torch>=2.0.0
 torchaudio>=2.0.0
 opencc-python-reimplemented>=0.1.7

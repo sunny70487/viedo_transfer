@@ -1,6 +1,6 @@
 # ============================================================
-# FunASR 轉錄工具 — GPU-enabled Docker image
-# Base: NVIDIA CUDA 12.1 + cuDNN 8 (matches PyTorch / FunASR)
+# Qwen3-ASR 轉錄工具 — GPU-enabled Docker image
+# Base: NVIDIA CUDA 12.1 + cuDNN 8 (matches PyTorch / Qwen3-ASR)
 # ============================================================
 
 FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
@@ -55,7 +55,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
-# FunASR / ModelScope 模型快取路徑（可掛載外部 volume 避免重複下載）
+# Qwen3-ASR / HuggingFace / ModelScope 模型快取路徑（可掛載外部 volume 避免重複下載）
 ENV MODELSCOPE_CACHE=/app/models
 ENV HF_HOME=/app/models
 ENV HUGGINGFACE_HUB_CACHE=/app/models

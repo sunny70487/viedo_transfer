@@ -56,6 +56,7 @@ class Subtitle(BaseModel):
 
     @validator("words")
     def validate_words_timing(cls, v, values):
+        """驗證並自動鉗位詞級時間戳到字幕範圍內"""
         if v is None:
             return v
 
@@ -64,7 +65,15 @@ class Subtitle(BaseModel):
 
         for word in v:
             if word.start < start_time or word.end > end_time:
-                raise ValueError(f'詞語 "{word.word}" 的時間戳超出字幕範圍')
+                logger.warning(
+                    f'詞語 "{word.word}" 的時間戳 ({word.start:.3f}-{word.end:.3f}) '
+                    f"超出字幕範圍 ({start_time:.3f}-{end_time:.3f})，已自動鉗位"
+                )
+                word.start = max(word.start, start_time)
+                word.end = min(word.end, end_time)
+                # 鉗位後確保 start <= end
+                if word.start > word.end:
+                    word.start = word.end
 
         return v
 
