@@ -16,6 +16,7 @@ import yt_dlp
 import multiprocessing as mp
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from backend.shared.split_audio_helpers import split_audio as shared_split_audio
 
 # 嘗試導入 opencc 用於簡體→繁體轉換
 try:
@@ -117,156 +118,15 @@ def check_gpu():
 def split_audio(
     audio_path, segment_duration=30, output_dir=None, verbose=True, max_workers=None
 ):
-    """
-    將音檔分割為指定時長的片段，使用多線程加速處理
-
-    參數:
-        audio_path (str): 音檔文件路徑
-        segment_duration (int): 每個片段的時長（秒）
-        output_dir (str): 輸出目錄，None 表示使用臨時目錄
-        verbose (bool): 是否顯示詳細進度信息
-        max_workers (int): 最大工作線程數，None表示自動設定
-
-    返回:
-        list: 分割後的音檔片段文件路徑列表
-    """
-    # 創建臨時目錄或使用指定目錄
-    if output_dir is None:
-        temp_dir = tempfile.mkdtemp()
-        output_dir = temp_dir
-    else:
-        temp_dir = None
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-
-    segment_files = []
-
-    # 使用 ffmpeg 獲取音檔總長度（秒）
-    duration_cmd = ["ffmpeg", "-i", audio_path, "-hide_banner"]
-    try:
-        # 不使用 text=True，而是手動處理 bytes 輸出
-        result = subprocess.run(duration_cmd, capture_output=True)
-        # 使用 utf-8 編碼嘗試解碼輸出，忽略無法解碼的部分
-        output = result.stderr.decode("utf-8", errors="replace")
-
-        # 解析總時長
-        duration_match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)", output)
-        if duration_match:
-            h, m, s = duration_match.groups()
-            total_duration = int(h) * 3600 + int(m) * 60 + float(s)
-        else:
-            # 如果無法解析時長，嘗試用 pydub 獲取
-            try:
-                audio = AudioSegment.from_file(audio_path)
-                total_duration = len(audio) / 1000.0  # 毫秒轉秒
-            except Exception as e:
-                print(f"無法獲取音檔時長 (pydub): {e}")
-                # 估算一個值，假設檔案每 MB 對應約 1 分鐘的音檔
-                file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
-                total_duration = file_size_mb * 60
-    except Exception as e:
-        print(f"無法獲取音檔時長 (ffmpeg): {e}")
-        # 嘗試用 pydub 獲取
-        try:
-            audio = AudioSegment.from_file(audio_path)
-            total_duration = len(audio) / 1000.0  # 毫秒轉秒
-        except Exception as e2:
-            print(f"使用 pydub 獲取時長也失敗: {e2}")
-            # 估算一個值
-            file_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
-            total_duration = file_size_mb * 60
-
-    # 計算需要分割的段數
-    num_segments = int(total_duration / segment_duration) + 1
-
-    if verbose:
-        print(
-            f"音檔總長度: {int(total_duration / 3600):02d}:{int((total_duration % 3600) / 60):02d}:{int(total_duration % 60):02d}"
-        )
-        print(f"預計將分割為 {num_segments} 個片段")
-        print(f"使用多線程加速分割處理...")
-
-    # 定義單個分割任務
-    def split_segment(i):
-        start_time = i * segment_duration
-        if start_time >= total_duration:
-            return None
-
-        segment_filename = os.path.join(output_dir, f"segment_{i:03d}.flac")
-
-        # 優化ffmpeg命令提高效率
-        ffmpeg_cmd = [
-            "ffmpeg",
-            "-y",
-            "-ss",
-            str(start_time),  # 放在輸入前提高定位速度
-            "-i",
-            audio_path,
-            "-t",
-            str(segment_duration),
-            "-vn",
-            "-c:a",
-            "flac",
-            "-threads",
-            "2",  # 限制每個任務的線程數
-            segment_filename,
-        ]
-
-        try:
-            result = subprocess.run(ffmpeg_cmd, capture_output=True)
-            if result.returncode != 0:
-                error_message = result.stderr.decode("utf-8", errors="replace")
-                print(f"分割音檔段 {i} 時出錯: 返回碼 {result.returncode}")
-                print(f"錯誤輸出: {error_message}")
-                return None
-            return segment_filename
-        except Exception as e:
-            print(f"分割音檔段 {i} 時出錯: {e}")
-            return None
-
-    # 決定使用的最大線程數
-    if max_workers is None:
-        max_workers = min(mp.cpu_count(), 4)  # 預設最多使用4個核心避免過載
-
-    # 使用線程池並行處理分割任務
-    successful_segments = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # 提交所有任務
-        futures = {executor.submit(split_segment, i): i for i in range(num_segments)}
-
-        # 使用tqdm顯示進度條
-        if verbose and TQDM_AVAILABLE:
-            pbar = tqdm(total=num_segments, desc="分割進度")
-        elif verbose:
-            print(f"開始分割處理 {num_segments} 個片段...")
-
-        # 處理完成的任務
-        completed_count = 0
-        for future in as_completed(futures):
-            segment_file = future.result()
-            if segment_file:
-                successful_segments.append(segment_file)
-            if verbose:
-                completed_count += 1
-                if TQDM_AVAILABLE:
-                    pbar.update(1)
-                elif completed_count % 10 == 0 or completed_count == num_segments:
-                    percent_complete = min(
-                        100, round((completed_count / num_segments) * 100)
-                    )
-                    print(
-                        f"分割進度: {percent_complete}% ({completed_count}/{num_segments})"
-                    )
-
-        if verbose and TQDM_AVAILABLE:
-            pbar.close()
-
-    # 排序片段文件以確保順序正確
-    segment_files = sorted(successful_segments)
-
-    if verbose:
-        print(f"分割完成! 共生成 {len(segment_files)} 個片段。")
-
-    return segment_files, temp_dir
+    tqdm_factory = tqdm if verbose and TQDM_AVAILABLE else None
+    return shared_split_audio(
+        audio_path,
+        segment_duration=segment_duration,
+        output_dir=output_dir,
+        verbose=verbose,
+        max_workers=max_workers,
+        tqdm_factory=tqdm_factory,
+    )
 
 
 _MODEL_CACHE_LOCK = threading.Lock()

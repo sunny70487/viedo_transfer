@@ -27,11 +27,11 @@ import torch
 # ---- Re-use utilities from the original FunASR module ----
 from backend.funasr_transcribe import (
     download_from_url,  # noqa: F401 — re-exported
-    split_audio,
     _convert_to_traditional,
     _strip_punctuation,
     _split_long_segments,
 )
+from backend.shared.split_audio_helpers import split_audio
 from backend.shared.transcribe_helpers import check_gpu, format_timestamp
 from backend.shared.video_utils import maybe_prepare_video_output
 
