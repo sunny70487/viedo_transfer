@@ -16,6 +16,10 @@ import yt_dlp
 import multiprocessing as mp
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from backend.shared.transcribe_helpers import (
+    check_gpu as shared_check_gpu,
+    format_timestamp as shared_format_timestamp,
+)
 from backend.shared.video_utils import maybe_prepare_video_output
 
 # 嘗試導入 tqdm 用於顯示進度條，但如果不可用也能繼續執行
@@ -28,27 +32,7 @@ except ImportError:
 
 
 def check_gpu():
-    """
-    檢查 GPU 狀態並返回詳細資訊
-    """
-    gpu_info = {
-        "available": torch.cuda.is_available(),
-        "device_count": torch.cuda.device_count(),
-        "devices": [],
-    }
-
-    if gpu_info["available"]:
-        for i in range(gpu_info["device_count"]):
-            gpu_info["devices"].append(
-                {
-                    "name": torch.cuda.get_device_name(i),
-                    "memory_allocated": f"{torch.cuda.memory_allocated(i) / 1024**2:.2f} MB",
-                    "memory_reserved": f"{torch.cuda.memory_reserved(i) / 1024**2:.2f} MB",
-                    "max_memory": f"{torch.cuda.get_device_properties(i).total_memory / 1024**3:.2f} GB",
-                }
-            )
-
-    return gpu_info
+    return shared_check_gpu(torch)
 
 
 def split_audio(
@@ -601,21 +585,7 @@ def transcribe_audio(
 
 
 def format_timestamp(seconds, format="srt"):
-    """
-    將秒數格式化為 SRT 或 VTT 格式的時間戳
-    """
-    hours = int(seconds / 3600)
-    minutes = int((seconds % 3600) / 60)
-    secs = seconds % 60
-
-    if format == "srt":
-        return (
-            f"{hours:02d}:{minutes:02d}:{int(secs):02d},{int(secs * 1000) % 1000:03d}"
-        )
-    elif format == "vtt":
-        return f"{hours:02d}:{minutes:02d}:{secs:.3f}"
-    else:
-        return f"{hours:02d}:{minutes:02d}:{secs:.3f}"
+    return shared_format_timestamp(seconds, format=format)
 
 
 def download_from_url(
