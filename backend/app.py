@@ -320,32 +320,21 @@ def simulate_progress(task_id, total_steps, is_split_mode=False):
     current_progress = task.progress
     target_progress = 95.0
 
-    # 計算每步進度增量
-    progress_increment = (target_progress - current_progress) / total_steps
-
     for step in range(total_steps):
         # 如果任務已完成或失敗，停止更新
         if task.status in ["completed", "failed"] or task_id not in tasks:
             break
 
-        # 更新進度
-        current_progress += progress_increment
-        task.progress = min(target_progress, current_progress)
-
-        # 更新消息
-        if is_split_mode:
-            # 如果是分段模式，顯示分段進度
-            completed_segments = step + 1
-            task.message = f"正在處理分段 {completed_segments}/{total_steps} ({(completed_segments / total_steps * 100):.1f}%)"
-        elif step % 3 == 0:  # 每3步更新一次消息
-            messages = [
-                "正在處理音頻...",
-                "正在分析語音...",
-                "正在生成轉錄...",
-                "正在處理時間戳...",
-                "正在優化結果...",
-            ]
-            task.message = messages[step % len(messages)]
+        current_progress, next_message = next_progress_state(
+            current_progress=current_progress,
+            target_progress=target_progress,
+            total_steps=total_steps,
+            step=step,
+            is_split_mode=is_split_mode,
+        )
+        task.progress = current_progress
+        if next_message:
+            task.message = next_message
 
         # 等待一段時間
         time.sleep(2)  # 每2秒更新一次進度
