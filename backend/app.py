@@ -464,21 +464,9 @@ async def transcribe_from_upload(
 ):
     """從上傳的文件創建轉錄任務"""
     try:
-        # 驗證文件類型
-        if not file.filename:
-            return JSONResponse(status_code=400, content={"error": "未提供文件名"})
-
-        # 檢查文件擴展名
-        valid_extensions = sorted(SUPPORTED_MEDIA_EXTENSIONS)
-        file_ext = os.path.splitext(file.filename)[1].lower()
-
-        if file_ext not in valid_extensions:
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "error": f"不支援的檔案格式: {file_ext}。支援的格式: {', '.join(valid_extensions)}"
-                },
-            )
+        valid, error = validate_upload_filename(file.filename)
+        if not valid:
+            return JSONResponse(status_code=400, content={"error": error})
 
         task_obj = create_task_entry(
             tasks=tasks,
@@ -489,19 +477,20 @@ async def transcribe_from_upload(
         task_obj.message = "正在上傳文件"
         save_task_to_disk(task_obj)
 
-        # 保存上傳的文件
-        file_path = UPLOAD_DIR / f"{task_obj.id}_{file.filename}"
         try:
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+            file_path = save_uploaded_file(
+                upload_dir=UPLOAD_DIR,
+                task_id=task_obj.id,
+                upload_file=file,
+            )
         except Exception as e:
             logger.error(f"保存上傳文件失敗: {str(e)}", exc_info=True)
             return JSONResponse(
                 status_code=500, content={"error": f"保存文件時出錯: {str(e)}"}
             )
 
-        # 創建請求對象
-        request = TranscriptionRequest(
+        request = build_transcription_request(
+            request_cls=TranscriptionRequest,
             model_size=model_size,
             device=device,
             compute_type=compute_type,
