@@ -16,6 +16,11 @@ import yt_dlp
 import multiprocessing as mp
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from backend.shared.download_helpers import (
+    build_safe_title,
+    build_yt_dlp_options,
+    download_from_url as shared_download_from_url,
+)
 from backend.shared.transcribe_helpers import (
     check_gpu as shared_check_gpu,
     format_timestamp as shared_format_timestamp,
@@ -456,175 +461,14 @@ def download_from_url(
     cookies=None,
     video_quality="best",
 ):
-    """
-    使用 yt-dlp 從 URL 下載視頻或音檔
-
-    參數:
-        url (str): 要下載的 URL
-        output_dir (str): 輸出目錄，默認為當前目錄
-        download_format (str): 下載格式，可以是 "audio" 或 "video"
-        verbose (bool): 是否顯示詳細進度信息
-        cookies (str): Cookie 文件路徑，用於需要登錄的網站
-        video_quality (str): 影片畫質，可選值: "best", "1080p", "720p", "480p", "360p"
-
-    返回:
-        tuple: (下載的文件路徑, 檔案資料夾路徑)
-    """
-    if verbose:
-        print(f"正在從 URL 下載: {url}")
-        print(f"設定的影片品質: {video_quality}")
-
-    # 設置基本輸出目錄
-    if output_dir:
-        base_output_path = Path(output_dir)
-        base_output_path.mkdir(parents=True, exist_ok=True)
-    else:
-        base_output_path = Path.cwd()
-
-    # 首先獲取影片資訊以建立資料夾名稱
-    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
-        info = ydl.extract_info(url, download=False)
-        video_title = info.get("title", None)
-        if video_title:
-            # 處理標題中的特殊字符，確保安全的資料夾名稱
-            safe_title = "".join(
-                [c if c.isalnum() or c in [" ", "-", "_"] else "_" for c in video_title]
-            )
-            safe_title = safe_title[:50]  # 限制長度
-        else:
-            # 如果無法獲取標題，使用時間戳
-            safe_title = f"download_{int(time.time())}"
-
-    # 創建專屬資料夾
-    folder_path = base_output_path / safe_title
-    folder_path.mkdir(exist_ok=True)
-
-    if verbose:
-        print(f"為該下載項目創建資料夾: {folder_path}")
-
-    # 設定 yt-dlp 選項
-    ydl_opts = {
-        "quiet": not verbose,
-        "no_warnings": not verbose,
-        "paths": {"home": str(folder_path)},
-        "outtmpl": {"default": "%(title)s.%(ext)s"},
-        "windowsfilenames": True,  # 讓文件名在 Windows 上有效
-        "restrictfilenames": True,  # 避免使用特殊字符
-        "keepvideo": True,  # 保留原始視頻文件，防止被自動刪除
-    }
-
-    # 根據下載格式設定不同的選項
-    if download_format == "audio":
-        ydl_opts.update(
-            {
-                "format": "bestaudio/best",
-                "postprocessors": [
-                    {
-                        "key": "FFmpegExtractAudio",
-                        "preferredcodec": "flac",  # 統一使用 FLAC 格式
-                        "preferredquality": "192",
-                    }
-                ],
-                "keepfiles": True,  # 保留中間檔案，確保音訊檔案生成成功
-            }
-        )
-    else:  # video
-        # 根據所選畫質設定格式
-        if video_quality == "best":
-            format_str = "bestvideo+bestaudio/best"
-        elif video_quality == "1080p":
-            format_str = "bestvideo[height<=1080]+bestaudio/best[height<=1080]"
-        elif video_quality == "720p":
-            format_str = "bestvideo[height<=720]+bestaudio/best[height<=720]"
-        elif video_quality == "480p":
-            format_str = "bestvideo[height<=480]+bestaudio/best[height<=480]"
-        elif video_quality == "360p":
-            format_str = "bestvideo[height<=360]+bestaudio/best[height<=360]"
-        else:
-            format_str = "best"  # 預設使用最佳品質
-
-        ydl_opts.update(
-            {
-                "format": format_str,
-                "merge_output_format": "mp4",  # 設置合併後的輸出格式為 mp4
-            }
-        )
-
-    # 添加 cookies 文件（如果有提供）
-    if cookies:
-        ydl_opts["cookiefile"] = cookies
-
-    downloaded_file = None
-
-    # 定義一個鉤子來獲取下載的文件路徑
-    def get_filepath_hook(d):
-        nonlocal downloaded_file
-        if d["status"] == "finished":
-            downloaded_file = d["filename"]
-            if verbose:
-                print(f"下載完成：{downloaded_file}")
-
-    ydl_opts["progress_hooks"] = [get_filepath_hook]
-
-    # 執行下載
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info_dict = ydl.extract_info(url, download=True)
-            # 如果文件已經下載，可能沒有觸發 hook，所以需要手動設置檔案路徑
-            if not downloaded_file and "requested_downloads" in info_dict:
-                # 嘗試從 info_dict 獲取檔案路徑
-                for download in info_dict["requested_downloads"]:
-                    downloaded_file = download.get("filepath")
-                    if downloaded_file:
-                        if verbose:
-                            print(f"使用已存在的檔案：{downloaded_file}")
-                        break
-
-            # 如果仍然沒有檔案路徑，嘗試使用標題和擴展名構建
-            if not downloaded_file and "title" in info_dict and "ext" in info_dict:
-                safe_title = "".join(
-                    [
-                        c if c.isalnum() or c in [" ", "-", "_"] else "_"
-                        for c in info_dict["title"]
-                    ]
-                )
-                safe_title = safe_title[:50]
-                possible_path = str(folder_path / f"{safe_title}.{info_dict['ext']}")
-                if os.path.exists(possible_path):
-                    downloaded_file = possible_path
-                    if verbose:
-                        print(f"檢測到已存在的檔案：{downloaded_file}")
-    except Exception as e:
-        # 檢查錯誤信息，如果包含「檔案已經下載」相關信息
-        error_msg = str(e).lower()
-        if "has already been downloaded" in error_msg or "already exists" in error_msg:
-            # 嘗試從錯誤消息中提取檔案路徑
-            path_match = re.search(r"'(.*?)'", str(e))
-            if path_match:
-                downloaded_file = path_match.group(1)
-                if verbose:
-                    print(f"使用已下載的檔案：{downloaded_file}")
-            else:
-                # 嘗試在資料夾中找到可能的檔案
-                potential_files = list(folder_path.glob("*.*"))
-                if potential_files:
-                    # 獲取最新的檔案
-                    downloaded_file = str(
-                        sorted(potential_files, key=os.path.getmtime)[-1]
-                    )
-                    if verbose:
-                        print(f"使用資料夾中最新的檔案：{downloaded_file}")
-        else:
-            print(f"下載時出錯: {e}")
-
-    # 如果是音檔下載，文件擴展名會更改為 .flac
-    if download_format == "audio" and downloaded_file:
-        downloaded_file = re.sub(r"\.[^.]+$", ".flac", downloaded_file)
-
-    if downloaded_file and verbose:
-        print(f"文件已下載至: {downloaded_file}")
-
-    return downloaded_file, folder_path
+    return shared_download_from_url(
+        url,
+        output_dir=output_dir,
+        download_format=download_format,
+        verbose=verbose,
+        cookies=cookies,
+        video_quality=video_quality,
+    )
 
 
 def main():
