@@ -789,153 +789,13 @@ async def stream_video_with_range(file_path: str, media_type: str, request: Requ
         return FileResponse(path=file_path, media_type=media_type)
 
 
-@app.get("/gpu-info")
-async def get_gpu_info():
-    """獲取 GPU 信息"""
-    return check_gpu()
-
-
-@app.get("/system/directories")
-async def get_system_directories():
-    """獲取系統目錄列表"""
-    system = platform.system()
-    directories = []
-
-    try:
-        if system == "Windows":
-            # 獲取 Windows 驅動器列表
-            import win32api
-
-            drives = win32api.GetLogicalDriveStrings()
-            drives = drives.split("\000")[:-1]
-            directories = drives
-
-            # 添加常用目錄
-            user_profile = os.environ.get("USERPROFILE")
-            if user_profile:
-                directories.append(user_profile)
-                directories.append(os.path.join(user_profile, "Desktop"))
-                directories.append(os.path.join(user_profile, "Documents"))
-                directories.append(os.path.join(user_profile, "Downloads"))
-
-        elif system == "Linux" or system == "Darwin":  # macOS
-            # 添加 Linux/macOS 常用目錄
-            home = os.path.expanduser("~")
-            directories = [
-                "/",
-                home,
-                os.path.join(home, "Desktop"),
-                os.path.join(home, "Documents"),
-                os.path.join(home, "Downloads"),
-                "/tmp",
-            ]
-
-            # 過濾不存在的目錄
-            directories = [d for d in directories if os.path.exists(d)]
-
-    except Exception as e:
-        logger.error(f"獲取系統目錄時出錯: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=500, content={"error": f"獲取系統目錄時出錯: {str(e)}"}
-        )
-
-    return {"directories": directories}
-
-
-@app.get("/system/subdirectories")
-async def get_subdirectories(path: str):
-    """獲取指定路徑的子目錄"""
-    try:
-        if not os.path.exists(path):
-            return JSONResponse(
-                status_code=404, content={"error": f"路徑不存在: {path}"}
-            )
-
-        if not os.path.isdir(path):
-            return JSONResponse(
-                status_code=400, content={"error": f"路徑不是目錄: {path}"}
-            )
-
-        subdirectories = []
-        files = []
-
-        # 列出目錄內容
-        for item in os.listdir(path):
-            item_path = os.path.join(path, item)
-
-            # 跳過隱藏文件/目錄
-            if item.startswith("."):
-                continue
-
-            try:
-                if os.path.isdir(item_path):
-                    subdirectories.append(
-                        {"name": item, "path": item_path, "type": "directory"}
-                    )
-                else:
-                    # 檢查是否為音頻/視頻文件
-                    file_ext = os.path.splitext(item)[1].lower()
-                    valid_media_extensions = [
-                        ".mp3",
-                        ".wav",
-                        ".ogg",
-                        ".flac",
-                        ".aac",
-                        ".mp4",
-                        ".avi",
-                        ".mov",
-                        ".mkv",
-                        ".webm",
-                    ]
-
-                    if file_ext in valid_media_extensions:
-                        # 獲取文件大小
-                        try:
-                            size_bytes = os.path.getsize(item_path)
-                            # 轉換為人類可讀格式
-                            if size_bytes < 1024:
-                                size_str = f"{size_bytes} B"
-                            elif size_bytes < 1024 * 1024:
-                                size_str = f"{size_bytes / 1024:.1f} KB"
-                            elif size_bytes < 1024 * 1024 * 1024:
-                                size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
-                            else:
-                                size_str = f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
-                        except:
-                            size_str = "未知大小"
-
-                        files.append(
-                            {
-                                "name": item,
-                                "path": item_path,
-                                "type": "file",
-                                "extension": file_ext,
-                                "size": size_str,
-                            }
-                        )
-            except Exception as e:
-                logger.warning(f"處理項目 {item_path} 時出錯: {str(e)}")
-                continue
-
-        # 按名稱排序
-        subdirectories.sort(key=lambda x: x["name"].lower())
-        files.sort(key=lambda x: x["name"].lower())
-
-        return {"subdirectories": subdirectories, "files": files}
-
-    except Exception as e:
-        logger.error(f"獲取子目錄時出錯: {str(e)}", exc_info=True)
-        return JSONResponse(
-            status_code=500, content={"error": f"獲取子目錄時出錯: {str(e)}"}
-        )
-
-
 # 導入字幕 API 模組
 from backend.services.subtitle_api import (
     router as subtitle_router,
     set_task_store,
     TaskStore,
 )
+from backend.services.system_api import router as system_router
 
 
 # 字幕編輯器相關 API 端點
@@ -956,6 +816,7 @@ async def subtitle_editor_page(request: Request, task_id: str):
 
 # 包含字幕 API 路由
 app.include_router(subtitle_router)
+app.include_router(system_router)
 
 # 設置任務存儲供字幕 API 使用
 set_task_store(TaskStore(tasks))
