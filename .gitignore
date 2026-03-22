@@ -2,6 +2,7 @@
 .ace-tool/
 .vscode/
 .idea/
+.opencode/
 
 # Python
 .venv/
