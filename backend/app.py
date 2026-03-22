@@ -252,25 +252,15 @@ def process_transcription(
         # 執行轉錄
         task.message = "正在執行轉錄..."
 
-        # 估算總步驟數或使用分段數量
-        if request.split_segments:
-            # 獲取音頻時長來估算分段數量
-            import librosa
+        import librosa
 
-            try:
-                audio_duration = librosa.get_duration(path=file_path)
-                estimated_steps = max(1, int(audio_duration / request.segment_duration))
-                logger.info(
-                    f"音頻時長: {audio_duration}秒，預計分段數: {estimated_steps}"
-                )
-            except Exception as e:
-                logger.warning(f"無法獲取音頻時長: {str(e)}，使用文件大小估算")
-                file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-                estimated_steps = max(10, int(file_size_mb / 5))
-        else:
-            # 根據文件大小估算
-            file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
-            estimated_steps = max(10, int(file_size_mb / 5))  # 每5MB一個步驟，至少10步
+        estimated_steps = estimate_total_steps(
+            split_segments=request.split_segments,
+            segment_duration=request.segment_duration,
+            file_path=file_path,
+            get_duration=lambda path: librosa.get_duration(path=path),
+            get_file_size_mb=lambda path: os.path.getsize(path) / (1024 * 1024),
+        )
 
         # 模擬進度更新
         progress_thread = threading.Thread(
@@ -280,10 +270,7 @@ def process_transcription(
         progress_thread.daemon = True
         progress_thread.start()
 
-        # 狀態回調：讓轉錄函數能更新任務狀態訊息
-        def status_callback(message):
-            task.message = message
-            save_task_to_disk(task)
+        status_callback = build_status_callback(task=task, save_task=save_task_to_disk)
 
         # 執行實際轉錄
         transcription_results = transcribe_audio(
@@ -319,10 +306,7 @@ def process_transcription(
 
     except Exception as e:
         logger.error(f"任務 {task_id} 失敗: {str(e)}", exc_info=True)
-        task.status = "failed"
-        task.message = f"轉錄失敗: {str(e)}"
-        task.error = str(e)
-        task.end_time = time.time()
+        finalize_task_failure(task=task, error=e, now=time.time())
         save_task_to_disk(task)  # 保存失敗狀態
 
 
