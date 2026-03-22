@@ -16,6 +16,7 @@ import yt_dlp
 import multiprocessing as mp
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from backend.shared.video_utils import maybe_prepare_video_output
 
 # 嘗試導入 tqdm 用於顯示進度條，但如果不可用也能繼續執行
 try:
@@ -583,98 +584,15 @@ def transcribe_audio(
         print(full_transcript)
         print("=" * 50 + "\n")
 
-    # 處理原始影片文件（如果存在）
-    # 檢查輸入文件是否為影片格式
-    video_extensions = {
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".webm",
-        ".flv",
-        ".wmv",
-        ".m4v",
-        ".mpeg",
-        ".mpg",
-    }
-    audio_path_obj = Path(audio_path)
-    file_ext = audio_path_obj.suffix.lower()
-
-    if file_ext in video_extensions:
-        if verbose:
-            print(f"\n檢測到影片文件格式: {file_ext}")
-
-        # 如果不是 MP4，轉換為 MP4（使用 FFmpeg）
-        if file_ext != ".mp4":
-            try:
-                import subprocess
-
-                mp4_filename = f"{base_filename}_converted.mp4"
-                mp4_path = base_output_path / mp4_filename
-
-                if status_callback:
-                    status_callback(
-                        f"正在將 {file_ext} 轉換為 MP4 以確保瀏覽器兼容性..."
-                    )
-                if verbose:
-                    print(f"正在將 {file_ext} 轉換為 MP4 以確保瀏覽器兼容性...")
-
-                # FFmpeg 轉換命令
-                # 使用快速預設和恆定質量模式，保留音訊
-                cmd = [
-                    "ffmpeg",
-                    "-i",
-                    str(audio_path),
-                    "-c:v",
-                    "libx264",  # H.264 視訊編碼
-                    "-preset",
-                    "fast",  # 快速編碼
-                    "-crf",
-                    "23",  # 恆定質量（18-28，23是平衡點）
-                    "-c:a",
-                    "aac",  # AAC 音訊編碼
-                    "-b:a",
-                    "128k",  # 音訊碼率
-                    "-movflags",
-                    "+faststart",  # 優化網路播放
-                    "-y",  # 覆蓋現有文件
-                    str(mp4_path),
-                ]
-
-                # 執行轉換（隱藏 FFmpeg 輸出）
-                result = subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
-
-                if result.returncode == 0 and mp4_path.exists():
-                    output_files["video"] = str(mp4_path)
-                    output_files["mp4"] = str(mp4_path)
-                    if verbose:
-                        file_size_mb = mp4_path.stat().st_size / (1024 * 1024)
-                        print(
-                            f"✓ 影片已轉換為 MP4: {mp4_path.name} ({file_size_mb:.1f} MB)"
-                        )
-                else:
-                    # 轉換失敗，使用原始文件
-                    if verbose:
-                        print(f"⚠ 影片轉換失敗，使用原始文件")
-                        print(f"FFmpeg 錯誤: {result.stderr[:200]}")
-                    output_files["video"] = str(audio_path)
-                    output_files[file_ext.lstrip(".")] = str(audio_path)
-
-            except Exception as e:
-                # 如果轉換失敗（如 FFmpeg 未安裝），使用原始文件
-                if verbose:
-                    print(f"⚠ 無法轉換影片: {str(e)}")
-                    print(f"使用原始影片文件")
-                output_files["video"] = str(audio_path)
-                output_files[file_ext.lstrip(".")] = str(audio_path)
-        else:
-            # 已經是 MP4，直接使用
-            output_files["video"] = str(audio_path)
-            output_files["mp4"] = str(audio_path)
-            if verbose:
-                print(f"✓ 影片已經是 MP4 格式，無需轉換")
+    maybe_prepare_video_output(
+        audio_path,
+        base_output_path,
+        base_filename,
+        output_files,
+        verbose=verbose,
+        status_callback=status_callback,
+        expose_mp4_key=True,
+    )
 
     if verbose:
         print(f"\n轉錄結果已保存至: {output_files}")

@@ -30,3 +30,5 @@ librosa>=0.10.0
 # Speaker diarization (說話者辨識)
 pyannote.audio>=3.1.0
 speechbrain>=1.0.0
+
+# 開發 / 測試工具請安裝根目錄的 requirements-dev.txt

@@ -65,6 +65,31 @@ cd whisper_transfer
 pip install -r backend/requirements.txt
 ```
 
+### 開發驗證基線
+
+若要執行目前已建立的最小品質檢查，請另外安裝開發工具：
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+接著可以執行：
+
+```bash
+# 執行目前的回歸測試
+python -m pytest tests/test_models.py tests/test_task_persistence.py tests/test_subtitle_api_smoke.py tests/test_subtitle_api_store.py tests/test_video_utils.py -q
+
+# 檢查測試檔與 shared helper 的基本 lint
+python -m flake8 tests backend/shared/video_utils.py
+```
+
+目前這批測試主要保護：
+
+- `backend/models.py` 的基礎驗證行為
+- `backend/task_persistence.py` 的 round-trip / rebuild 行為
+- `backend/services/subtitle_api.py` 的最小 smoke path 與 task store 初始化行為
+- `backend/shared/video_utils.py` 的影片判斷與 FFmpeg command 建構
+
 ### Docker 部署（推薦）
 
 需要 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 以啟用 GPU 支援。
