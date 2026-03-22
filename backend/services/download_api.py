@@ -4,6 +4,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
 
+from backend.shared.media_config import VIDEO_EXTENSIONS, get_media_type
+
 router = APIRouter(tags=["download"])
 
 _task_registry: Optional[Dict[str, Any]] = None
@@ -33,17 +35,6 @@ async def download_result(task_id: str, file_type: str, request: Request):
             status_code=400, content={"error": "任務尚未完成或沒有結果"}
         )
 
-    video_extensions = {
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".webm",
-        ".flv",
-        ".wmv",
-        ".m4v",
-    }
-
     if file_type in task.result["files"]:
         file_path = task.result["files"][file_type]
     elif file_type == "video":
@@ -58,7 +49,7 @@ async def download_result(task_id: str, file_type: str, request: Request):
             for _, path in task.result["files"].items():
                 if isinstance(path, str):
                     ext = os.path.splitext(path)[1].lower()
-                    if ext in video_extensions:
+                    if ext in VIDEO_EXTENSIONS:
                         video_file_path = path
                         break
 
@@ -74,18 +65,7 @@ async def download_result(task_id: str, file_type: str, request: Request):
     if not os.path.exists(file_path):
         return JSONResponse(status_code=404, content={"error": "文件不存在"})
 
-    ext = os.path.splitext(file_path)[1].lower()
-    media_types = {
-        ".mp4": "video/mp4",
-        ".webm": "video/webm",
-        ".mkv": "video/x-matroska",
-        ".avi": "video/x-msvideo",
-        ".mov": "video/quicktime",
-        ".flv": "video/x-flv",
-        ".wmv": "video/x-ms-wmv",
-        ".m4v": "video/x-m4v",
-    }
-    media_type = media_types.get(ext, "application/octet-stream")
+    media_type = get_media_type(file_path)
     download_filename = os.path.basename(file_path)
 
     return FileResponse(

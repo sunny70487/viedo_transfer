@@ -444,18 +444,7 @@ async def transcribe_from_local(request: TranscriptionRequest):
         )
 
     # 檢查文件是否為可支持的音頻/視頻格式
-    valid_extensions = [
-        ".mp3",
-        ".wav",
-        ".ogg",
-        ".flac",
-        ".aac",
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".webm",
-    ]
+    valid_extensions = sorted(SUPPORTED_MEDIA_EXTENSIONS)
     file_ext = os.path.splitext(request.file_path)[1].lower()
 
     if file_ext not in valid_extensions:
@@ -507,18 +496,7 @@ async def transcribe_from_upload(
             return JSONResponse(status_code=400, content={"error": "未提供文件名"})
 
         # 檢查文件擴展名
-        valid_extensions = [
-            ".mp3",
-            ".wav",
-            ".ogg",
-            ".flac",
-            ".aac",
-            ".mp4",
-            ".avi",
-            ".mov",
-            ".mkv",
-            ".webm",
-        ]
+        valid_extensions = sorted(SUPPORTED_MEDIA_EXTENSIONS)
         file_ext = os.path.splitext(file.filename)[1].lower()
 
         if file_ext not in valid_extensions:
