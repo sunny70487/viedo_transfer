@@ -9,6 +9,7 @@ __pycache__/
 *.pyc
 *.pyo
 .ruff_cache/
+.worktrees/
 
 # Node (dev tools only)
 node_modules/
@@ -25,6 +26,9 @@ nul
 
 # Models (large binary files)
 faster-whisper-large-v3-zh-TW/
+
+# Secrets
+.env
 
 # OS
 .DS_Store

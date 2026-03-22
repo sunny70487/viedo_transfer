@@ -5,6 +5,9 @@ python-multipart>=0.0.6
 jinja2>=3.1.2
 aiofiles>=23.1.0
 
+# 環境變數
+python-dotenv>=1.0.0
+
 # 系統相關依賴
 pywin32>=305; platform_system=="Windows"
 
@@ -22,4 +25,8 @@ ffmpeg-python>=0.2.0
 soundfile>=0.10.3
 pydub>=0.25.1
 yt-dlp>=2023.3.4
-librosa>=0.10.0 
+librosa>=0.10.0
+
+# Speaker diarization (說話者辨識)
+pyannote.audio>=3.1.0
+speechbrain>=1.0.0

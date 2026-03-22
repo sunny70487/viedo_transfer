@@ -2,6 +2,10 @@
 # -*- coding: utf-8 -*-
 
 import os
+from dotenv import load_dotenv
+
+load_dotenv()  # 載入 .env 中的環境變數（如 HF_TOKEN）
+
 import time
 import uuid
 import threading
@@ -171,6 +175,8 @@ class TranscriptionRequest(BaseModel):
     video_quality: str = "best"
     output_dir: Optional[str] = None
     file_path: Optional[str] = None  # 添加本地文件路徑
+    speaker_diarization: bool = False  # 啟用說話者辨識
+    num_speakers: Optional[int] = None  # 說話者人數（None 為自動偵測）
 
 
 # 導入字幕相關資料模型
@@ -295,6 +301,8 @@ def process_transcription(
             split_segments=request.split_segments,
             segment_duration=request.segment_duration,
             status_callback=status_callback,
+            speaker_diarization=request.speaker_diarization,
+            num_speakers=request.num_speakers,
         )
 
         # 更新任務狀態
@@ -493,6 +501,8 @@ async def transcribe_from_upload(
     split_segments: bool = Form(False),
     segment_duration: int = Form(30),
     output_dir: Optional[str] = Form(None),
+    speaker_diarization: bool = Form(False),
+    num_speakers: Optional[int] = Form(None),
 ):
     """從上傳的文件創建轉錄任務"""
     try:
@@ -559,6 +569,8 @@ async def transcribe_from_upload(
             split_segments=split_segments,
             segment_duration=segment_duration,
             output_dir=output_dir,
+            speaker_diarization=speaker_diarization,
+            num_speakers=num_speakers,
         )
 
         # 在背景執行轉錄任務

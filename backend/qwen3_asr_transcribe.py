@@ -359,6 +359,8 @@ def transcribe_audio(
     segment_duration=30,
     max_workers=None,
     status_callback=None,
+    speaker_diarization=False,
+    num_speakers=None,
 ) -> dict:
     """
     使用 Qwen3-ASR 將音檔轉錄為文本
@@ -382,6 +384,8 @@ def transcribe_audio(
         segment_duration (int): 分割片段的時長（秒）
         max_workers (int): 分割音檔時使用的最大工作線程數
         status_callback (callable): 狀態回調函數
+        speaker_diarization (bool): 是否啟用說話者辨識
+        num_speakers (int): 說話者人數（None 表示自動偵測）
 
     返回:
         dict: 輸出文件路徑字典
@@ -677,6 +681,79 @@ def transcribe_audio(
             if show_in_terminal and segment_text:
                 print(f"[{seg_start:.2f}s -> {seg_end:.2f}s] {segment_text}")
 
+    # ================================================================
+    # Speaker diarization (optional post-processing step)
+    # ================================================================
+    if speaker_diarization and segments_json:
+        try:
+            if status_callback:
+                status_callback("正在執行說話者辨識 (Speaker Diarization)...")
+            if verbose:
+                print("正在執行說話者辨識 (pyannote.audio)...")
+
+            from backend.services.diarization_service import (
+                run_diarization,
+                assign_speakers_to_segments,
+            )
+
+            diarization_segments = run_diarization(
+                audio_path=audio_path,
+                num_speakers=num_speakers,
+                device=device,
+            )
+
+            # Assign speaker labels to ASR segments
+            assign_speakers_to_segments(segments_json, diarization_segments)
+
+            if verbose:
+                speakers = {
+                    seg.get("speaker") for seg in segments_json if seg.get("speaker")
+                }
+                print(f"說話者辨識完成，共偵測到 {len(speakers)} 位說話者")
+
+            if status_callback:
+                status_callback("說話者辨識完成，正在生成輸出...")
+        except Exception as e:
+            # Diarization failure should not block transcription output
+            if verbose:
+                print(f"⚠ 說話者辨識失敗: {e}")
+            logger = __import__("logging").getLogger(__name__)
+            logger.warning(f"Speaker diarization failed: {e}", exc_info=True)
+
+    # ================================================================
+    # Rebuild SRT / VTT / transcript with speaker labels (if present)
+    # ================================================================
+    srt_content = ""
+    vtt_content = "WEBVTT\n\n"
+    transcript_parts = []
+
+    for seg in segments_json:
+        segment_text = seg["text"]
+        if not segment_text:
+            continue
+
+        speaker = seg.get("speaker")
+        display_text = f"[{speaker}]: {segment_text}" if speaker else segment_text
+
+        transcript_parts.append(display_text)
+
+        seg_start = seg["start"]
+        seg_end = seg["end"]
+        segment_number = seg["id"] + 1
+
+        start_time_srt = format_timestamp(seg_start, format="srt")
+        end_time_srt = format_timestamp(seg_end, format="srt")
+        srt_content += (
+            f"{segment_number}\n{start_time_srt} --> {end_time_srt}\n{display_text}\n\n"
+        )
+
+        start_time_vtt = format_timestamp(seg_start, format="vtt")
+        end_time_vtt = format_timestamp(seg_end, format="vtt")
+        vtt_content += f"{start_time_vtt} --> {end_time_vtt}\n{display_text}\n\n"
+
+        if show_in_terminal and display_text:
+            print(f"[{seg_start:.2f}s -> {seg_end:.2f}s] {display_text}")
+
     # 寫入標準輸出文件
 
     # 純文本輸出
@@ -699,12 +776,19 @@ def transcribe_audio(
         output_files["vtt"] = str(vtt_path)
 
     full_transcript = "\n".join(transcript_parts)
+
+    # Collect unique speakers for JSON metadata
+    speakers_detected = sorted(
+        {seg.get("speaker") for seg in segments_json if seg.get("speaker")}
+    )
+
     json_data = {
         "text": full_transcript,
         "segments": segments_json,
         "language": detected_language,
         "language_probability": language_probability,
         "words": words_data if words_data else None,
+        "speakers": speakers_detected if speakers_detected else None,
     }
 
     json_path = base_output_path / f"{base_filename}.json"
@@ -775,9 +859,7 @@ def transcribe_audio(
                     str(mp4_path),
                 ]
 
-                result = subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
+                result = subprocess.run(cmd, capture_output=True)
 
                 if result.returncode == 0 and mp4_path.exists():
                     output_files["video"] = str(mp4_path)
@@ -787,9 +869,10 @@ def transcribe_audio(
                             f"✓ 影片已轉換為 MP4: {mp4_path.name} ({file_size_mb:.1f} MB)"
                         )
                 else:
+                    stderr_msg = result.stderr.decode("utf-8", errors="replace")[:200]
                     if verbose:
                         print("⚠ 影片轉換失敗，使用原始文件")
-                        print(f"FFmpeg 錯誤: {result.stderr[:200]}")
+                        print(f"FFmpeg 錯誤: {stderr_msg}")
                     output_files["video"] = str(audio_path)
 
             except Exception as e:
