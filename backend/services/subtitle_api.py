@@ -11,21 +11,20 @@ import json
 import time
 import logging
 from typing import Dict, Any, Optional
-from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Path as FastAPIPath
-from fastapi.responses import JSONResponse, FileResponse, Response
+from fastapi.responses import FileResponse, Response
 
 from backend.models import (
     SubtitleCollection,
     Subtitle,
     Word,
     RetranscribeRequest,
-    SubtitleExportRequest,
     SubtitleSearchRequest,
     SubtitleSearchResult,
     VideoInfo,
     SubtitleMetadata,
 )
+from backend.services.retranscribe_service import get_retranscribe_service
 
 # 設置日誌
 logger = logging.getLogger("subtitle_api")
@@ -108,13 +107,13 @@ class SubtitleService:
                     if file_type in task.result["files"]:
                         file_path = task.result["files"][file_type]
                         if os.path.exists(file_path):
-                            video_info.video_url = f"/download/{task_id}/video"  # 統一使用 'video' 作為鍵名
+                            video_info.video_url = f"/download/{task_id}/video"
                             # 從文件路徑提取實際格式
                             actual_format = os.path.splitext(file_path)[1].lstrip(".")
                             video_info.format = actual_format or file_type
                             try:
                                 video_info.file_size = os.path.getsize(file_path)
-                            except:
+                            except OSError:
                                 pass
                             video_file_found = True
                             logger.info(
@@ -144,7 +143,7 @@ class SubtitleService:
                                 video_info.format = ext.lstrip(".")
                                 try:
                                     video_info.file_size = os.path.getsize(file_path)
-                                except:
+                                except OSError:
                                     pass
                                 logger.info(
                                     f"通過擴展名找到影片: {file_path}, 格式: {video_info.format}"
@@ -593,10 +592,6 @@ async def get_supported_formats():
     return {"supported_formats": formats, "total_count": len(formats)}
 
 
-# 導入重新轉錄服務
-from backend.services.retranscribe_service import get_retranscribe_service
-
-
 # 重新轉錄相關 API 端點
 @router.post("/{task_id}/retranscribe")
 async def create_retranscribe_task(
@@ -736,19 +731,14 @@ async def delete_retranscribe_task(
     try:
         retranscribe_service = get_retranscribe_service()
 
-        with retranscribe_service._lock:
-            if retranscribe_task_id not in retranscribe_service.retranscribe_tasks:
-                raise HTTPException(status_code=404, detail="重新轉錄任務不存在")
+        task = retranscribe_service.get_retranscribe_task(retranscribe_task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="重新轉錄任務不存在")
 
-            task = retranscribe_service.retranscribe_tasks[retranscribe_task_id]
+        if task.status not in ["completed", "failed"]:
+            raise HTTPException(status_code=400, detail="只能刪除已完成或失敗的任務")
 
-            # 只允許刪除已完成或失敗的任務
-            if task.status not in ["completed", "failed"]:
-                raise HTTPException(
-                    status_code=400, detail="只能刪除已完成或失敗的任務"
-                )
-
-            del retranscribe_service.retranscribe_tasks[retranscribe_task_id]
+        retranscribe_service.delete_task(retranscribe_task_id)
 
         return {"message": "重新轉錄任務已刪除"}
 

@@ -12,7 +12,6 @@ import time
 import threading
 import logging
 from typing import Dict, Any, Optional
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 import json
 
@@ -93,7 +92,7 @@ class RetranscribeService:
                 self.retranscribe_tasks[retranscribe_task_id] = retranscribe_task
 
             # 提交任務到執行器
-            future = self.executor.submit(
+            self.executor.submit(
                 self._process_retranscribe_task, retranscribe_task_id, tasks_storage
             )
 
@@ -113,6 +112,11 @@ class RetranscribeService:
         """獲取所有重新轉錄任務"""
         with self._lock:
             return self.retranscribe_tasks.copy()
+
+    def delete_task(self, task_id: str) -> Optional[RetranscribeTask]:
+        """刪除重新轉錄任務並返回被刪除的任務"""
+        with self._lock:
+            return self.retranscribe_tasks.pop(task_id, None)
 
     def _process_retranscribe_task(self, task_id: str, tasks_storage: Dict[str, Any]):
         """處理重新轉錄任務"""
