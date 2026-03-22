@@ -212,25 +212,13 @@ def process_transcription(
         )
         os.makedirs(output_directory, exist_ok=True)
 
-        # 如果提供了 URL，先下載
         if request.url:
-            task.message = f"正在從 URL 下載: {request.url}"
-            task.progress = 10.0
-
-            downloaded_file, folder_path = download_from_url(
-                url=request.url,
-                output_dir=output_directory,
-                download_format=request.download_format,
-                verbose=True,
-                video_quality=request.video_quality,
+            file_path = prepare_url_input(
+                task=task,
+                request=request,
+                output_directory=output_directory,
+                download=download_from_url,
             )
-
-            if not downloaded_file:
-                raise Exception("下載失敗")
-
-            file_path = downloaded_file
-            task.message = f"下載完成，開始轉錄: {file_path}"
-            task.progress = 30.0
         else:
             # 如果是上傳的文件，直接設置進度
             task.progress = 30.0
@@ -704,6 +692,7 @@ from backend.services.transcription_orchestrator import (
     finalize_task_success,
     resolve_output_directory,
 )
+from backend.services.url_preprocessing import prepare_url_input
 
 
 # 字幕編輯器相關 API 端點
