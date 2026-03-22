@@ -599,17 +599,13 @@ async def create_retranscribe_task(
     task_id: str = FastAPIPath(..., description="原始任務 ID"),
 ):
     """創建重新轉錄任務"""
-    tasks = get_tasks_storage()
-
     # 驗證任務 ID 匹配
     if request.task_id != task_id:
         raise HTTPException(status_code=400, detail="請求中的任務 ID 與路徑不匹配")
 
     try:
         retranscribe_service = get_retranscribe_service()
-        retranscribe_task_id = retranscribe_service.create_retranscribe_task(
-            request, tasks
-        )
+        retranscribe_task_id = retranscribe_service.create_retranscribe_task(request)
 
         return {
             "retranscribe_task_id": retranscribe_task_id,

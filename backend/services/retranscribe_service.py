@@ -57,22 +57,26 @@ logger = logging.getLogger("retranscribe_service")
 class RetranscribeService:
     """重新轉錄服務類"""
 
-    def __init__(self, max_workers: int = 2):
+    def __init__(self, task_store=None, max_workers: int = 2):
         self.retranscribe_tasks: Dict[str, RetranscribeTask] = {}
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.audio_service = AudioSegmentService()
         self._lock = threading.Lock()
+        self.task_store = task_store
 
-    def create_retranscribe_task(
-        self, request: RetranscribeRequest, tasks_storage: Dict[str, Any]
-    ) -> str:
+    def create_retranscribe_task(self, request: RetranscribeRequest) -> str:
         """創建重新轉錄任務"""
         try:
+            if self.task_store is None:
+                raise ValueError("任務存儲未初始化")
+
+            tasks = self.task_store.get_tasks()
+
             # 驗證原始任務
-            if request.task_id not in tasks_storage:
+            if request.task_id not in tasks:
                 raise ValueError(f"原始任務不存在: {request.task_id}")
 
-            original_task = tasks_storage[request.task_id]
+            original_task = tasks[request.task_id]
             if original_task.status != "completed" or not original_task.result:
                 raise ValueError("原始任務尚未完成或沒有結果")
 
@@ -92,9 +96,7 @@ class RetranscribeService:
                 self.retranscribe_tasks[retranscribe_task_id] = retranscribe_task
 
             # 提交任務到執行器
-            self.executor.submit(
-                self._process_retranscribe_task, retranscribe_task_id, tasks_storage
-            )
+            self.executor.submit(self._process_retranscribe_task, retranscribe_task_id)
 
             logger.info(f"重新轉錄任務已創建: {retranscribe_task_id}")
             return retranscribe_task_id
@@ -118,7 +120,7 @@ class RetranscribeService:
         with self._lock:
             return self.retranscribe_tasks.pop(task_id, None)
 
-    def _process_retranscribe_task(self, task_id: str, tasks_storage: Dict[str, Any]):
+    def _process_retranscribe_task(self, task_id: str):
         """處理重新轉錄任務"""
         try:
             with self._lock:
@@ -135,8 +137,13 @@ class RetranscribeService:
 
             logger.info(f"開始處理重新轉錄任務: {task_id}")
 
+            if self.task_store is None:
+                raise RuntimeError("任務存儲未初始化")
+
+            tasks = self.task_store.get_tasks()
+
             # 獲取原始任務資料
-            original_task = tasks_storage[task.original_task_id]
+            original_task = tasks[task.original_task_id]
 
             # 尋找原始音頻文件
             audio_file_path = self._find_audio_file(original_task)
@@ -404,7 +411,9 @@ def get_retranscribe_service() -> RetranscribeService:
     """獲取重新轉錄服務實例"""
     global _retranscribe_service
     if _retranscribe_service is None:
-        _retranscribe_service = RetranscribeService()
+        from backend.services.subtitle_api import _task_store
+
+        _retranscribe_service = RetranscribeService(task_store=_task_store)
     return _retranscribe_service
 
 

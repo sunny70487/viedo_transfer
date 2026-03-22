@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.models import RetranscribeRequest
+
 
 def _load_modules():
     sys.modules.pop("backend.services.retranscribe_service", None)
@@ -68,3 +70,61 @@ def test_delete_retranscribe_endpoint_uses_service_delete_method(monkeypatch):
 
     assert response.status_code == 200
     assert service_stub.called_with == "task-1"
+
+
+def test_create_retranscribe_task_reads_original_task_from_injected_store(monkeypatch):
+    retranscribe_service, _ = _load_modules()
+
+    class _StoreStub:
+        def __init__(self, tasks):
+            self._tasks = tasks
+
+        def get_tasks(self):
+            return self._tasks
+
+    original_task = SimpleNamespace(status="completed", result={"files": {"json": "x"}})
+    store = _StoreStub({"task-1": original_task})
+    service = retranscribe_service.RetranscribeService(task_store=store)
+
+    submitted = {}
+
+    def _fake_submit(fn, task_id):
+        submitted["fn"] = fn
+        submitted["task_id"] = task_id
+        return None
+
+    service.executor.submit = _fake_submit
+
+    request = RetranscribeRequest(
+        task_id="task-1",
+        subtitle_index=0,
+        start_time=0.0,
+        end_time=1.0,
+    )
+
+    task_id = service.create_retranscribe_task(request)
+
+    assert task_id in service.retranscribe_tasks
+    assert submitted["task_id"] == task_id
+
+
+def test_create_retranscribe_task_fails_when_store_has_no_original_task():
+    retranscribe_service, _ = _load_modules()
+
+    class _StoreStub:
+        def get_tasks(self):
+            return {}
+
+    service = retranscribe_service.RetranscribeService(task_store=_StoreStub())
+    request = RetranscribeRequest(
+        task_id="missing",
+        subtitle_index=0,
+        start_time=0.0,
+        end_time=1.0,
+    )
+
+    try:
+        service.create_retranscribe_task(request)
+        assert False, "Expected missing original task to raise"
+    except ValueError as exc:
+        assert "原始任務不存在" in str(exc)
