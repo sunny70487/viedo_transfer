@@ -464,25 +464,19 @@ async def transcribe_from_local(request: TranscriptionRequest):
             },
         )
 
-    task_id = str(uuid.uuid4())
-    task = Task(
-        id=task_id,
-        status="queued",
-        message="任務已加入隊列",
-        start_time=time.time(),
+    task = create_task_entry(
+        tasks=tasks,
+        save_task=save_task_to_disk,
         source_name=os.path.basename(request.file_path),
     )
-    tasks[task_id] = task
-    save_task_to_disk(task)  # 保存新任務
-
-    # 在背景執行轉錄任務
-    thread = threading.Thread(
-        target=process_transcription, args=(task_id, request.file_path, request)
+    start_transcription_thread(
+        target=process_transcription,
+        task_id=task.id,
+        file_path=request.file_path,
+        request=request,
     )
-    thread.daemon = True
-    thread.start()
 
-    return {"task_id": task_id}
+    return {"task_id": task.id}
 
 
 @app.post("/transcribe/upload")
@@ -533,19 +527,17 @@ async def transcribe_from_upload(
                 },
             )
 
-        task_id = str(uuid.uuid4())
-        task_obj = Task(
-            id=task_id,
-            status="uploading",
-            message="正在上傳文件",
-            start_time=time.time(),
+        task_obj = create_task_entry(
+            tasks=tasks,
+            save_task=save_task_to_disk,
             source_name=file.filename,
         )
-        tasks[task_id] = task_obj
-        save_task_to_disk(task_obj)  # 保存新任務
+        task_obj.status = "uploading"
+        task_obj.message = "正在上傳文件"
+        save_task_to_disk(task_obj)
 
         # 保存上傳的文件
-        file_path = UPLOAD_DIR / f"{task_id}_{file.filename}"
+        file_path = UPLOAD_DIR / f"{task_obj.id}_{file.filename}"
         try:
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
@@ -574,13 +566,14 @@ async def transcribe_from_upload(
         )
 
         # 在背景執行轉錄任務
-        thread = threading.Thread(
-            target=process_transcription, args=(task_id, str(file_path), request)
+        start_transcription_thread(
+            target=process_transcription,
+            task_id=task_obj.id,
+            file_path=str(file_path),
+            request=request,
         )
-        thread.daemon = True
-        thread.start()
 
-        return {"task_id": task_id}
+        return {"task_id": task_obj.id}
 
     except Exception as e:
         logger.error(f"處理上傳請求時出錯: {str(e)}", exc_info=True)
