@@ -205,8 +205,10 @@ def process_transcription(
 
     try:
         # 設置輸出目錄
-        output_directory = (
-            request.output_dir if request.output_dir else str(OUTPUT_DIR / task_id)
+        output_directory = resolve_output_directory(
+            request=request,
+            task_id=task_id,
+            output_root=OUTPUT_DIR,
         )
         os.makedirs(output_directory, exist_ok=True)
 
@@ -305,12 +307,12 @@ def process_transcription(
             num_speakers=request.num_speakers,
         )
 
-        # 更新任務狀態
-        task.status = "completed"
-        task.progress = 100.0  # 確保進度為100%
-        task.message = "轉錄完成"
-        task.result = {"files": transcription_results, "output_dir": output_directory}
-        task.end_time = time.time()
+        finalize_task_success(
+            task=task,
+            transcription_results=transcription_results,
+            output_directory=output_directory,
+            now=time.time(),
+        )
         save_task_to_disk(task)  # 保存完成狀態
 
         logger.info(f"任務 {task_id} 完成: {transcription_results}")
@@ -758,6 +760,10 @@ from backend.services.download_api import (
 )
 from backend.services.system_api import router as system_router
 from backend.services.task_api import router as task_router, set_task_registry
+from backend.services.transcription_orchestrator import (
+    finalize_task_success,
+    resolve_output_directory,
+)
 
 
 # 字幕編輯器相關 API 端點
