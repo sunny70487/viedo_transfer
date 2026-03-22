@@ -210,6 +210,19 @@
                                                     生成詞級時間戳
                                                 </label>
                                             </div>
+                                            <hr>
+                                            <div class="form-check mb-3">
+                                                <input class="form-check-input" type="checkbox" id="speaker-diarization" name="speaker_diarization">
+                                                <label class="form-check-label" for="speaker-diarization">
+                                                    <i class="bi bi-people-fill me-1"></i>啟用說話者辨識 (Speaker Diarization)
+                                                </label>
+                                                <div class="form-text">使用 pyannote.audio 辨識多人對話中的不同說話者，需要設定 HuggingFace Token</div>
+                                            </div>
+                                            <div class="mb-3" id="num-speakers-container" style="display:none;">
+                                                <label for="num-speakers" class="form-label">說話者人數 (選填)</label>
+                                                <input type="number" class="form-control" id="num-speakers" name="num_speakers" min="1" max="20" placeholder="留空自動偵測">
+                                                <div class="form-text">如已知對話人數可手動指定，留空則自動偵測</div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>

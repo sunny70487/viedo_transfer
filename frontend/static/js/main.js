@@ -54,6 +54,18 @@ function initForms() {
             submitUploadForm();
         });
     }
+
+    // 說話者辨識 checkbox：切換人數輸入框顯示
+    const speakerDiarizationCheckbox = document.getElementById('speaker-diarization');
+    const numSpeakersContainer = document.getElementById('num-speakers-container');
+    if (speakerDiarizationCheckbox && numSpeakersContainer) {
+        speakerDiarizationCheckbox.addEventListener('change', function() {
+            numSpeakersContainer.style.display = this.checked ? 'block' : 'none';
+            if (!this.checked) {
+                document.getElementById('num-speakers').value = '';
+            }
+        });
+    }
 }
 
 /**
@@ -229,7 +241,9 @@ function getFormData() {
         output_format: document.getElementById('output-format').value,
         split_segments: document.getElementById('split-segments').checked,
         segment_duration: parseInt(document.getElementById('segment-duration').value),
-        output_dir: document.getElementById('output-dir').value || null
+        output_dir: document.getElementById('output-dir').value || null,
+        speaker_diarization: document.getElementById('speaker-diarization').checked,
+        num_speakers: parseInt(document.getElementById('num-speakers').value) || null
     };
     
     return formData;
@@ -259,6 +273,13 @@ function appendFormDataParams(formData) {
     const outputDir = document.getElementById('output-dir').value;
     if (outputDir) {
         formData.append('output_dir', outputDir);
+    }
+
+    // Speaker diarization params
+    formData.append('speaker_diarization', document.getElementById('speaker-diarization').checked);
+    const numSpeakers = document.getElementById('num-speakers').value;
+    if (numSpeakers) {
+        formData.append('num_speakers', numSpeakers);
     }
 }
 
