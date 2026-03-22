@@ -589,42 +589,6 @@ async def transcribe_from_upload(
         )
 
 
-@app.get("/tasks/{task_id}")
-async def get_task_status(task_id: str):
-    """獲取任務狀態"""
-    if task_id not in tasks:
-        return JSONResponse(status_code=404, content={"error": "任務不存在"})
-
-    task = tasks[task_id]
-    return task.dict()
-
-
-@app.delete("/tasks/{task_id}")
-async def delete_task(task_id: str):
-    """刪除任務"""
-    if task_id not in tasks:
-        return JSONResponse(status_code=404, content={"error": "任務不存在"})
-
-    task = tasks[task_id]
-
-    # 只允許刪除已完成或失敗的任務
-    if task.status not in ("completed", "failed"):
-        return JSONResponse(
-            status_code=400, content={"error": "只能刪除已完成或失敗的任務"}
-        )
-
-    del tasks[task_id]
-    TaskPersistence.delete_task(task_id)
-
-    return {"message": "任務已刪除"}
-
-
-@app.get("/tasks")
-async def get_all_tasks():
-    """獲取所有任務"""
-    return {task_id: task.dict() for task_id, task in tasks.items()}
-
-
 @app.get("/download/{task_id}/{file_type}")
 async def download_result(task_id: str, file_type: str, request: Request):
     """下載或串流轉錄結果文件（支持影片範圍請求）"""
@@ -796,6 +760,7 @@ from backend.services.subtitle_api import (
     TaskStore,
 )
 from backend.services.system_api import router as system_router
+from backend.services.task_api import router as task_router, set_task_registry
 
 
 # 字幕編輯器相關 API 端點
@@ -817,9 +782,11 @@ async def subtitle_editor_page(request: Request, task_id: str):
 # 包含字幕 API 路由
 app.include_router(subtitle_router)
 app.include_router(system_router)
+app.include_router(task_router)
 
 # 設置任務存儲供字幕 API 使用
 set_task_store(TaskStore(tasks))
+set_task_registry(tasks)
 
 # 啟動應用
 if __name__ == "__main__":
