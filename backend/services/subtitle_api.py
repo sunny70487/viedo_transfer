@@ -325,21 +325,33 @@ class SubtitleService:
         )
 
 
-# 全域變數，用於存取任務資料（在實際應用中應該使用依賴注入）
-_tasks_storage = None
+class TaskStore:
+    def __init__(self, tasks: Optional[Dict[str, Any]] = None):
+        self._tasks = tasks
+
+    def set_tasks(self, tasks: Dict[str, Any]) -> None:
+        self._tasks = tasks
+
+    def get_tasks(self) -> Dict[str, Any]:
+        if self._tasks is None:
+            raise HTTPException(status_code=500, detail="任務存儲未初始化")
+        return self._tasks
+
+
+_task_store = TaskStore()
+
+
+def set_task_store(task_store: TaskStore) -> None:
+    global _task_store
+    _task_store = task_store
 
 
 def set_tasks_storage(tasks):
-    """設置任務存儲"""
-    global _tasks_storage
-    _tasks_storage = tasks
+    _task_store.set_tasks(tasks)
 
 
 def get_tasks_storage():
-    """獲取任務存儲"""
-    if _tasks_storage is None:
-        raise HTTPException(status_code=500, detail="任務存儲未初始化")
-    return _tasks_storage
+    return _task_store.get_tasks()
 
 
 # API 端點定義

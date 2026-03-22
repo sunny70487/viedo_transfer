@@ -931,7 +931,11 @@ async def get_subdirectories(path: str):
 
 
 # 導入字幕 API 模組
-from backend.services.subtitle_api import router as subtitle_router, set_tasks_storage
+from backend.services.subtitle_api import (
+    router as subtitle_router,
+    set_task_store,
+    TaskStore,
+)
 
 
 # 字幕編輯器相關 API 端點
@@ -954,7 +958,7 @@ async def subtitle_editor_page(request: Request, task_id: str):
 app.include_router(subtitle_router)
 
 # 設置任務存儲供字幕 API 使用
-set_tasks_storage(tasks)
+set_task_store(TaskStore(tasks))
 
 # 啟動應用
 if __name__ == "__main__":
