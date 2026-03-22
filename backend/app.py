@@ -759,6 +759,10 @@ from backend.services.subtitle_api import (
     set_task_store,
     TaskStore,
 )
+from backend.services.download_api import (
+    router as download_router,
+    set_download_task_registry,
+)
 from backend.services.system_api import router as system_router
 from backend.services.task_api import router as task_router, set_task_registry
 
@@ -781,11 +785,13 @@ async def subtitle_editor_page(request: Request, task_id: str):
 
 # 包含字幕 API 路由
 app.include_router(subtitle_router)
+app.include_router(download_router)
 app.include_router(system_router)
 app.include_router(task_router)
 
 # 設置任務存儲供字幕 API 使用
 set_task_store(TaskStore(tasks))
+set_download_task_registry(tasks)
 set_task_registry(tasks)
 
 # 啟動應用
