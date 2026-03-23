@@ -40,8 +40,11 @@ RUN grep -v "pywin32" requirements.txt > /tmp/requirements_linux.txt \
 # 後端核心檔案
 COPY backend/ ./backend/
 
-# 前端靜態資源與模板
+# 前端靜態資源與模板（舊版 Jinja2）
 COPY frontend/ ./frontend/
+
+# React 前端建置輸出（如存在）
+COPY frontend-react/dist/ ./frontend-react/dist/
 
 # ---- 預設目錄 ----
 RUN mkdir -p /app/outputs /app/uploads /app/temp /app/models

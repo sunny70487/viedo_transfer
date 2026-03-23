@@ -2,6 +2,13 @@
 # -*- coding: utf-8 -*-
 
 import os
+import sys
+from pathlib import Path
+
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -84,14 +91,25 @@ app = FastAPI(
     title="Whisper 轉錄應用", description="使用 Qwen3-ASR 進行音頻轉錄的 Web 應用"
 )
 
-# 設置靜態文件和模板（前端檔案位於 frontend/ 目錄下）
+# 前端檔案路徑設定
 _BASE_DIR = Path(__file__).resolve().parent.parent
 _FRONTEND_DIR = _BASE_DIR / "frontend"
+_REACT_DIST = _BASE_DIR / "frontend-react" / "dist"
+_USE_REACT = _REACT_DIST.is_dir() and (_REACT_DIST / "index.html").exists()
 
+# 舊版前端（Jinja2 + Bootstrap）
 app.mount(
     "/static", StaticFiles(directory=str(_FRONTEND_DIR / "static")), name="static"
 )
 templates = Jinja2Templates(directory=str(_FRONTEND_DIR / "templates"))
+
+# React 前端靜態資源（如果建置輸出存在）
+if _USE_REACT:
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_REACT_DIST / "assets")),
+        name="react-assets",
+    )
 
 # 確保必要的目錄存在
 UPLOAD_DIR = Path("uploads")
@@ -333,10 +351,11 @@ app.add_middleware(
 # 路由定義
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-    """渲染主頁面"""
-    gpu_info = check_gpu()
+    """渲染主頁面（React 或舊版 Jinja2）"""
+    if _USE_REACT:
+        return FileResponse(str(_REACT_DIST / "index.html"))
 
-    # 在此處添加影片畫質選項，前端應該更新UI來呈現這些選項
+    gpu_info = check_gpu()
     video_quality_options = [
         {"value": "best", "label": "最佳品質"},
         {"value": "1080p", "label": "1080p"},
@@ -344,7 +363,6 @@ async def index(request: Request):
         {"value": "480p", "label": "480p"},
         {"value": "360p", "label": "360p"},
     ]
-
     return templates.TemplateResponse(
         "index.html",
         {
@@ -518,6 +536,14 @@ async def subtitle_editor_page(request: Request, task_id: str):
     return templates.TemplateResponse(
         "subtitle_editor.html", {"request": request, "task_id": task_id}
     )
+
+
+@app.get("/editor/{task_id}")
+async def react_editor_page(task_id: str):
+    """React 版字幕編輯器（SPA client-side routing）"""
+    if _USE_REACT:
+        return FileResponse(str(_REACT_DIST / "index.html"))
+    return JSONResponse(status_code=404, content={"error": "React 前端未建置"})
 
 
 # 包含字幕 API 路由

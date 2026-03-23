@@ -1,0 +1,20 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { api } from '@/api/client'
+import type { SubtitleCollection } from '@/types/api'
+
+export function useSubtitles(taskId: string) {
+  return useQuery({
+    queryKey: ['subtitles', taskId],
+    queryFn: () => api.getSubtitles(taskId),
+    enabled: !!taskId,
+    staleTime: Infinity,
+  })
+}
+
+export function useSaveSubtitles(taskId: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (data: SubtitleCollection) => api.saveSubtitles(taskId, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['subtitles', taskId] }),
+  })
+}
