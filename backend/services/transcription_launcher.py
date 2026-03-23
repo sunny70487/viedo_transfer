@@ -3,13 +3,11 @@ import time
 import uuid
 
 
-class Task:
-    pass
-
-
-def create_task_entry(*, tasks, save_task, source_name):
+def create_task_entry(*, tasks, save_task, source_name, task_cls=None):
+    if task_cls is None:
+        from backend.app import Task as task_cls
     task_id = str(uuid.uuid4())
-    task = Task(
+    task = task_cls(
         id=task_id,
         status="queued",
         message="任務已加入隊列",

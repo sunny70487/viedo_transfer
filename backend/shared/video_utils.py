@@ -1,19 +1,7 @@
 from pathlib import Path
 import subprocess
 
-
-VIDEO_EXTENSIONS = {
-    ".mp4",
-    ".avi",
-    ".mov",
-    ".mkv",
-    ".webm",
-    ".flv",
-    ".wmv",
-    ".m4v",
-    ".mpeg",
-    ".mpg",
-}
+from backend.shared.media_config import VIDEO_EXTENSIONS
 
 
 def is_video_file(path: str | Path) -> bool:

@@ -11,6 +11,8 @@ VIDEO_EXTENSIONS = {
     ".flv",
     ".wmv",
     ".m4v",
+    ".mpeg",
+    ".mpg",
 }
 SUPPORTED_MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
 
@@ -23,6 +25,8 @@ MEDIA_TYPES = {
     ".flv": "video/x-flv",
     ".wmv": "video/x-ms-wmv",
     ".m4v": "video/x-m4v",
+    ".mpeg": "video/mpeg",
+    ".mpg": "video/mpeg",
 }
 
 

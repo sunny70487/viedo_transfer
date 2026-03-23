@@ -6,18 +6,19 @@
 負責將任務數據保存到磁盤並在應用啟動時恢復
 """
 
-import os
 import json
 import logging
+import threading
 from pathlib import Path
-from typing import Dict, Any, Optional
-import time
+from typing import Dict, Any
 
 logger = logging.getLogger("task_persistence")
 
-# 任務數據存儲文件
-TASKS_DATA_FILE = Path("tasks_data.json")
-OUTPUTS_DIR = Path("outputs")
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+TASKS_DATA_FILE = _PROJECT_ROOT / "tasks_data.json"
+OUTPUTS_DIR = _PROJECT_ROOT / "outputs"
+
+_file_lock = threading.Lock()
 
 
 class TaskPersistence:
@@ -25,83 +26,54 @@ class TaskPersistence:
     
     @staticmethod
     def save_task(task_id: str, task_data: Dict[str, Any]) -> bool:
-        """
-        保存單個任務數據到磁盤
-        
-        Args:
-            task_id: 任務 ID
-            task_data: 任務數據字典
-            
-        Returns:
-            bool: 是否成功保存
-        """
+        """保存單個任務數據到磁盤（thread-safe）"""
         try:
-            # 讀取現有任務數據
-            all_tasks = TaskPersistence.load_all_tasks()
-            
-            # 更新任務數據
-            all_tasks[task_id] = task_data
-            
-            # 保存到文件
-            with open(TASKS_DATA_FILE, 'w', encoding='utf-8') as f:
-                json.dump(all_tasks, f, ensure_ascii=False, indent=2, default=str)
-            
+            with _file_lock:
+                all_tasks = TaskPersistence._load_all_tasks_unlocked()
+                all_tasks[task_id] = task_data
+                with open(TASKS_DATA_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(all_tasks, f, ensure_ascii=False, indent=2, default=str)
             logger.debug(f"任務 {task_id} 已保存到磁盤")
             return True
-            
         except Exception as e:
             logger.error(f"保存任務 {task_id} 時出錯: {str(e)}", exc_info=True)
             return False
     
     @staticmethod
-    def load_all_tasks() -> Dict[str, Any]:
-        """
-        從磁盤載入所有任務數據
-        
-        Returns:
-            Dict[str, Any]: 所有任務數據
-        """
+    def _load_all_tasks_unlocked() -> Dict[str, Any]:
+        """Internal: load without acquiring the lock (caller must hold it)."""
         try:
             if not TASKS_DATA_FILE.exists():
-                logger.info("任務數據文件不存在，返回空字典")
                 return {}
-            
             with open(TASKS_DATA_FILE, 'r', encoding='utf-8') as f:
-                tasks = json.load(f)
-            
-            logger.info(f"從磁盤載入了 {len(tasks)} 個任務")
-            return tasks
-            
+                return json.load(f)
         except Exception as e:
             logger.error(f"載入任務數據時出錯: {str(e)}", exc_info=True)
             return {}
+
+    @staticmethod
+    def load_all_tasks() -> Dict[str, Any]:
+        """從磁盤載入所有任務數據（thread-safe）"""
+        with _file_lock:
+            tasks = TaskPersistence._load_all_tasks_unlocked()
+        if tasks:
+            logger.info(f"從磁盤載入了 {len(tasks)} 個任務")
+        return tasks
     
     @staticmethod
     def delete_task(task_id: str) -> bool:
-        """
-        從磁盤刪除任務數據
-        
-        Args:
-            task_id: 任務 ID
-            
-        Returns:
-            bool: 是否成功刪除
-        """
+        """從磁盤刪除任務數據（thread-safe）"""
         try:
-            all_tasks = TaskPersistence.load_all_tasks()
-            
-            if task_id in all_tasks:
+            with _file_lock:
+                all_tasks = TaskPersistence._load_all_tasks_unlocked()
+                if task_id not in all_tasks:
+                    logger.warning(f"任務 {task_id} 不存在於磁盤")
+                    return False
                 del all_tasks[task_id]
-                
                 with open(TASKS_DATA_FILE, 'w', encoding='utf-8') as f:
                     json.dump(all_tasks, f, ensure_ascii=False, indent=2, default=str)
-                
-                logger.info(f"任務 {task_id} 已從磁盤刪除")
-                return True
-            else:
-                logger.warning(f"任務 {task_id} 不存在於磁盤")
-                return False
-                
+            logger.info(f"任務 {task_id} 已從磁盤刪除")
+            return True
         except Exception as e:
             logger.error(f"刪除任務 {task_id} 時出錯: {str(e)}", exc_info=True)
             return False

@@ -22,16 +22,24 @@ from backend.shared.download_helpers import (
     download_from_url as shared_download_from_url,
 )
 from backend.shared.split_audio_helpers import split_audio as shared_split_audio
+from backend.shared.transcribe_helpers import (
+    check_gpu as _shared_check_gpu,
+    format_timestamp,
+)
+from backend.shared.transcription_pipeline import (
+    resolve_device,
+    print_gpu_info,
+    init_output_paths,
+    init_buffers,
+    write_output_files,
+)
 
-# 嘗試導入 opencc 用於簡體→繁體轉換
-try:
-    from opencc import OpenCC
-
-    _S2TW_CONVERTER = OpenCC("s2twp")
-    OPENCC_AVAILABLE = True
-except ImportError:
-    _S2TW_CONVERTER = None
-    OPENCC_AVAILABLE = False
+from backend.shared.text_processing import (
+    convert_to_traditional as _convert_to_traditional,
+    strip_punctuation as _strip_punctuation,
+    split_long_segments as _split_long_segments,
+    OPENCC_AVAILABLE,
+)
 
 # 嘗試導入 tqdm 用於顯示進度條，但如果不可用也能繼續執行
 try:
@@ -97,27 +105,8 @@ def _is_sensevoice_model(model_name: str) -> bool:
 
 
 def check_gpu():
-    """
-    檢查 GPU 狀態並返回詳細資訊
-    """
-    gpu_info = {
-        "available": torch.cuda.is_available(),
-        "device_count": torch.cuda.device_count(),
-        "devices": [],
-    }
-
-    if gpu_info["available"]:
-        for i in range(gpu_info["device_count"]):
-            gpu_info["devices"].append(
-                {
-                    "name": torch.cuda.get_device_name(i),
-                    "memory_allocated": f"{torch.cuda.memory_allocated(i) / 1024**2:.2f} MB",
-                    "memory_reserved": f"{torch.cuda.memory_reserved(i) / 1024**2:.2f} MB",
-                    "max_memory": f"{torch.cuda.get_device_properties(i).total_memory / 1024**3:.2f} GB",
-                }
-            )
-
-    return gpu_info
+    """檢查 GPU 狀態並返回詳細資訊（delegates to shared helper）"""
+    return _shared_check_gpu(torch)
 
 
 def split_audio(
@@ -225,95 +214,6 @@ def _clean_sensevoice_text(text: str) -> str:
     return rich_transcription_postprocess(text)
 
 
-def _convert_to_traditional(text: str) -> str:
-    """將簡體中文轉換為臺灣繁體中文（含詞彙轉換）。若 opencc 不可用則原樣返回。"""
-    if OPENCC_AVAILABLE and _S2TW_CONVERTER is not None:
-        return _S2TW_CONVERTER.convert(text)
-    return text
-
-
-# 字幕中需要移除的標點符號（中英文）
-_SUBTITLE_PUNCTUATION = re.compile(
-    r"[，。？、！；：\u201c\u201d\u2018\u2019（）【】《》…—,\.!\?;:\"\'()\[\]{}<>\-]"
-)
-
-
-def _strip_punctuation(text: str) -> str:
-    """移除字幕文字中的標點符號。"""
-    return _SUBTITLE_PUNCTUATION.sub("", text).strip()
-
-
-def _split_long_segments(segments_json, words_data, max_duration: float = 15.0):
-    """
-    Post-process: split any segment longer than *max_duration* seconds
-    at the nearest word boundary close to the midpoint.
-    This guarantees no subtitle block exceeds the threshold.
-    """
-    new_segments = []
-    new_words = []
-
-    for seg in segments_json:
-        seg_dur = seg["end"] - seg["start"]
-        seg_words = seg.get("words", [])
-
-        if seg_dur <= max_duration or len(seg_words) < 2:
-            seg["id"] = len(new_segments)
-            new_segments.append(seg)
-            new_words.extend(seg_words)
-            continue
-
-        # Split at the word boundary closest to the midpoint
-        mid_time = seg["start"] + seg_dur / 2.0
-        best_idx = 0
-        best_dist = float("inf")
-        for i in range(1, len(seg_words)):
-            dist = abs(seg_words[i]["start"] - mid_time)
-            if dist < best_dist:
-                best_dist = dist
-                best_idx = i
-
-        left_words = seg_words[:best_idx]
-        right_words = seg_words[best_idx:]
-
-        left_text = "".join(w["word"] for w in left_words)
-        right_text = "".join(w["word"] for w in right_words)
-
-        left_start = seg["start"]
-        left_end = left_words[-1]["end"] if left_words else mid_time
-        right_start = right_words[0]["start"] if right_words else mid_time
-        right_end = seg["end"]
-
-        left_seg = {
-            "id": len(new_segments),
-            "start": left_start,
-            "end": left_end,
-            "text": left_text,
-            "confidence": seg.get("confidence"),
-            "words": left_words,
-        }
-        new_segments.append(left_seg)
-        new_words.extend(left_words)
-
-        right_seg = {
-            "id": len(new_segments),
-            "start": right_start,
-            "end": right_end,
-            "text": right_text,
-            "confidence": seg.get("confidence"),
-            "words": right_words,
-        }
-        new_segments.append(right_seg)
-        new_words.extend(right_words)
-
-    # Recursively split if any segment is still too long
-    still_long = any(
-        (s["end"] - s["start"]) > max_duration and len(s.get("words", [])) >= 2
-        for s in new_segments
-    )
-    if still_long:
-        return _split_long_segments(new_segments, new_words, max_duration)
-
-    return new_segments, new_words
 
 
 def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
@@ -517,24 +417,8 @@ def transcribe_audio(
         print(f"正在載入模型: {model_name} (原始參數: {model_size})")
     start_time = time.time()
 
-    # 決定設備
-    if device == "auto":
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    elif device == "cuda":
-        device = "cuda:0"
-
-    if verbose:
-        print(f"使用設備: {device}")
-
-    # 顯示 GPU 資訊（如果使用）
-    if "cuda" in device and verbose:
-        gpu_info = check_gpu()
-        print(f"檢測到 {gpu_info['device_count']} 個 GPU 設備:")
-        for i, gpu in enumerate(gpu_info["devices"]):
-            print(f" - GPU {i}: {gpu['name']} ({gpu['max_memory']} 總記憶體)")
-            print(
-                f"   已分配: {gpu['memory_allocated']}, 已保留: {gpu['memory_reserved']}"
-            )
+    device = resolve_device(device, verbose=verbose)
+    print_gpu_info(device, verbose=verbose)
 
     if verbose:
         print(f"計算類型: {compute_type} (FunASR 不使用此參數)")
@@ -553,26 +437,16 @@ def transcribe_audio(
         print(f"模型載入完成，耗時: {model_load_time:.2f} 秒")
         print(f"開始轉錄音檔文件: {audio_path}")
 
-    # 決定輸出路徑
-    audio_path_obj = Path(audio_path)
-    base_output_path = Path(output_dir) if output_dir else audio_path_obj.parent
-    base_filename = audio_path_obj.stem
-
-    # 創建輸出目錄（如果不存在）
-    base_output_path.mkdir(parents=True, exist_ok=True)
-
-    # 初始化輸出內容
-    transcript_parts = []
-    srt_content = ""
-    vtt_content = "WEBVTT\n\n"
-    segments_json = []
-    words_data = []
-
-    # 用於儲存最終輸出文件路徑
-    output_files = {}
-
-    detected_language = None
-    language_probability = None
+    base_output_path, base_filename = init_output_paths(audio_path, output_dir)
+    bufs = init_buffers()
+    transcript_parts = bufs["transcript_parts"]
+    srt_content = bufs["srt_content"]
+    vtt_content = bufs["vtt_content"]
+    segments_json = bufs["segments_json"]
+    words_data = bufs["words_data"]
+    output_files = bufs["output_files"]
+    detected_language = bufs["detected_language"]
+    language_probability = bufs["language_probability"]
 
     if split_segments:
         if verbose:
@@ -752,162 +626,37 @@ def transcribe_audio(
             if show_in_terminal and segment_text:
                 print(f"[{seg_start:.2f}s -> {seg_end:.2f}s] {segment_text}")
 
-    # 寫入標準輸出文件
+    write_output_files(
+        base_output_path,
+        base_filename,
+        output_format,
+        transcript_parts,
+        srt_content,
+        vtt_content,
+        segments_json,
+        words_data,
+        detected_language,
+        language_probability,
+        output_files,
+        verbose=verbose,
+        show_in_terminal=show_in_terminal,
+    )
 
-    # 純文本輸出
-    txt_path = base_output_path / f"{base_filename}.txt"
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(transcript_parts))
-    output_files["txt"] = str(txt_path)
+    from backend.shared.video_utils import maybe_prepare_video_output
 
-    # 根據請求的格式輸出其他格式
-    if output_format == "srt" or output_format == "all":
-        srt_path = base_output_path / f"{base_filename}.srt"
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write(srt_content)
-        output_files["srt"] = str(srt_path)
-
-    if output_format == "vtt" or output_format == "all":
-        vtt_path = base_output_path / f"{base_filename}.vtt"
-        with open(vtt_path, "w", encoding="utf-8") as f:
-            f.write(vtt_content)
-        output_files["vtt"] = str(vtt_path)
-
-    import json
-
-    full_transcript = "\n".join(transcript_parts)
-    json_data = {
-        "text": full_transcript,
-        "segments": segments_json,
-        "language": detected_language,
-        "language_probability": language_probability,
-        "words": words_data if words_data else None,
-    }
-
-    json_path = base_output_path / f"{base_filename}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(json_data, f, ensure_ascii=False, indent=2)
-    output_files["json"] = str(json_path)
-
-    # 如果需要在終端顯示完整結果但不是實時顯示片段
-    if show_in_terminal and verbose and len(segments_json) == 0 and full_transcript:
-        print("\n" + "=" * 50)
-        print("轉錄結果:")
-        print("=" * 50)
-        print(full_transcript)
-        print("=" * 50 + "\n")
-
-    # 處理原始影片文件（如果存在）
-    # 檢查輸入文件是否為影片格式
-    video_extensions = {
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".mkv",
-        ".webm",
-        ".flv",
-        ".wmv",
-        ".m4v",
-        ".mpeg",
-        ".mpg",
-    }
-    audio_path_obj = Path(audio_path)
-    file_ext = audio_path_obj.suffix.lower()
-
-    if file_ext in video_extensions:
-        if verbose:
-            print(f"\n檢測到影片文件格式: {file_ext}")
-
-        # 如果不是 MP4，轉換為 MP4（使用 FFmpeg）
-        if file_ext != ".mp4":
-            try:
-                import subprocess
-
-                mp4_filename = f"{base_filename}_converted.mp4"
-                mp4_path = base_output_path / mp4_filename
-
-                if status_callback:
-                    status_callback(
-                        f"正在將 {file_ext} 轉換為 MP4 以確保瀏覽器兼容性..."
-                    )
-                if verbose:
-                    print(f"正在將 {file_ext} 轉換為 MP4 以確保瀏覽器兼容性...")
-
-                # FFmpeg 轉換命令
-                # 使用快速預設和恆定質量模式，保留音訊
-                cmd = [
-                    "ffmpeg",
-                    "-i",
-                    str(audio_path),
-                    "-c:v",
-                    "libx264",  # H.264 視訊編碼
-                    "-preset",
-                    "fast",  # 快速編碼
-                    "-crf",
-                    "23",  # 恆定質量（18-28，23是平衡點）
-                    "-c:a",
-                    "aac",  # AAC 音訊編碼
-                    "-b:a",
-                    "128k",  # 音訊碼率
-                    "-movflags",
-                    "+faststart",  # 優化網路播放
-                    "-y",  # 覆蓋現有文件
-                    str(mp4_path),
-                ]
-
-                # 執行轉換（隱藏 FFmpeg 輸出）
-                result = subprocess.run(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
-
-                if result.returncode == 0 and mp4_path.exists():
-                    output_files["video"] = str(mp4_path)
-                    if verbose:
-                        file_size_mb = mp4_path.stat().st_size / (1024 * 1024)
-                        print(
-                            f"✓ 影片已轉換為 MP4: {mp4_path.name} ({file_size_mb:.1f} MB)"
-                        )
-                else:
-                    # 轉換失敗，使用原始文件
-                    if verbose:
-                        print(f"⚠ 影片轉換失敗，使用原始文件")
-                        print(f"FFmpeg 錯誤: {result.stderr[:200]}")
-                    output_files["video"] = str(audio_path)
-
-            except Exception as e:
-                # 如果轉換失敗（如 FFmpeg 未安裝），使用原始文件
-                if verbose:
-                    print(f"⚠ 無法轉換影片: {str(e)}")
-                    print(f"使用原始影片文件")
-                output_files["video"] = str(audio_path)
-        else:
-            # 已經是 MP4，直接使用
-            output_files["video"] = str(audio_path)
-            if verbose:
-                print(f"✓ 影片已經是 MP4 格式，無需轉換")
+    maybe_prepare_video_output(
+        audio_path,
+        base_output_path,
+        base_filename,
+        output_files,
+        verbose=verbose,
+        status_callback=status_callback,
+    )
 
     if verbose:
         print(f"\n轉錄結果已保存至: {output_files}")
 
     return output_files
-
-
-def format_timestamp(seconds, format="srt"):
-    """
-    將秒數格式化為 SRT 或 VTT 格式的時間戳
-    """
-    hours = int(seconds / 3600)
-    minutes = int((seconds % 3600) / 60)
-    secs = seconds % 60
-
-    if format == "srt":
-        return (
-            f"{hours:02d}:{minutes:02d}:{int(secs):02d},{int(secs * 1000) % 1000:03d}"
-        )
-    elif format == "vtt":
-        return f"{hours:02d}:{minutes:02d}:{secs:.3f}"
-    else:
-        return f"{hours:02d}:{minutes:02d}:{secs:.3f}"
 
 
 def download_from_url(

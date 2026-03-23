@@ -20,34 +20,8 @@ from backend.services.audio_segment_service import (
     AudioSegmentService,
     AudioSegmentRequest,
 )
-from backend.qwen3_asr_transcribe import transcribe_audio as _qwen3_transcribe
-from backend.funasr_transcribe import transcribe_audio as _funasr_transcribe
-
-# FunASR 專屬模型名稱
-_FUNASR_MODEL_NAMES = {
-    "paraformer-zh",
-    "paraformer",
-    "sensevoice",
-    "SenseVoiceSmall",
-    "iic/SenseVoiceSmall",
-    "large-v3",
-    "whisper-large-v3",
-    "Whisper-large-v3",
-    "large-v3-turbo",
-    "whisper-large-v3-turbo",
-    "Whisper-large-v3-turbo",
-    "fun-asr-nano",
-    "nano",
-    "FunAudioLLM/Fun-ASR-Nano-2512",
-}
-
-
-def transcribe_audio(**kwargs):
-    """根據 model_size 自動路由到 Qwen3-ASR 或 FunASR 引擎"""
-    model_size = kwargs.get("model_size", "qwen3-asr-1.7b")
-    if model_size in _FUNASR_MODEL_NAMES:
-        return _funasr_transcribe(**kwargs)
-    return _qwen3_transcribe(**kwargs)
+from backend.shared.engine_routing import transcribe_audio
+from backend.shared.media_config import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS
 
 
 # 設置日誌
@@ -206,17 +180,13 @@ class RetranscribeService:
             if not original_task.result or not original_task.result.get("files"):
                 return None
 
-            # 優先尋找音頻文件
-            audio_extensions = [".flac", ".wav", ".mp3", ".aac", ".ogg"]
             for file_type, file_path in original_task.result["files"].items():
-                if any(file_path.lower().endswith(ext) for ext in audio_extensions):
+                if os.path.splitext(file_path)[1].lower() in AUDIO_EXTENSIONS:
                     if os.path.exists(file_path):
                         return file_path
 
-            # 如果沒有音頻文件，尋找視頻文件
-            video_extensions = [".mp4", ".avi", ".mov", ".mkv", ".webm"]
             for file_type, file_path in original_task.result["files"].items():
-                if any(file_path.lower().endswith(ext) for ext in video_extensions):
+                if os.path.splitext(file_path)[1].lower() in VIDEO_EXTENSIONS:
                     if os.path.exists(file_path):
                         return file_path
 

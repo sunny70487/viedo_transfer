@@ -24,15 +24,24 @@ from pathlib import Path
 
 import torch
 
-# ---- Re-use utilities from the original FunASR module ----
-from backend.funasr_transcribe import (
-    download_from_url,  # noqa: F401 — re-exported
-    _convert_to_traditional,
-    _strip_punctuation,
-    _split_long_segments,
+# ---- Re-use shared utilities ----
+from backend.shared.download_helpers import download_from_url  # noqa: F401 — re-exported
+from backend.shared.text_processing import (
+    convert_to_traditional as _convert_to_traditional,
+    strip_punctuation as _strip_punctuation,
+    split_long_segments as _split_long_segments,
 )
 from backend.shared.split_audio_helpers import split_audio
 from backend.shared.transcribe_helpers import check_gpu, format_timestamp
+from backend.shared.transcription_pipeline import (
+    resolve_device,
+    print_gpu_info,
+    init_output_paths,
+    init_buffers,
+    build_srt_entry,
+    build_vtt_entry,
+    write_output_files,
+)
 from backend.shared.video_utils import maybe_prepare_video_output
 
 # ============================================================
@@ -397,24 +406,8 @@ def transcribe_audio(
         print(f"正在載入模型: {model_name} (原始參數: {model_size})")
     start_time = time.time()
 
-    # 決定設備
-    if device == "auto":
-        device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    elif device == "cuda":
-        device = "cuda:0"
-
-    if verbose:
-        print(f"使用設備: {device}")
-
-    # 顯示 GPU 資訊（如果使用）
-    if "cuda" in device and verbose:
-        gpu_info = check_gpu()
-        print(f"檢測到 {gpu_info['device_count']} 個 GPU 設備:")
-        for i, gpu in enumerate(gpu_info["devices"]):
-            print(f" - GPU {i}: {gpu['name']} ({gpu['max_memory']} 總記憶體)")
-            print(
-                f"   已分配: {gpu['memory_allocated']}, 已保留: {gpu['memory_reserved']}"
-            )
+    device = resolve_device(device, verbose=verbose)
+    print_gpu_info(device, verbose=verbose)
 
     if verbose:
         print(f"計算類型: {compute_type} (Qwen3-ASR 不使用此參數)")
@@ -436,26 +429,16 @@ def transcribe_audio(
     # Resolve language for Qwen3-ASR
     lang_name = _resolve_language(language)
 
-    # 決定輸出路徑
-    audio_path_obj = Path(audio_path)
-    base_output_path = Path(output_dir) if output_dir else audio_path_obj.parent
-    base_filename = audio_path_obj.stem
-
-    # 創建輸出目錄（如果不存在）
-    base_output_path.mkdir(parents=True, exist_ok=True)
-
-    # 初始化輸出內容
-    transcript_parts = []
-    srt_content = ""
-    vtt_content = "WEBVTT\n\n"
-    segments_json = []
-    words_data = []
-
-    # 用於儲存最終輸出文件路徑
-    output_files = {}
-
-    detected_language = None
-    language_probability = None
+    base_output_path, base_filename = init_output_paths(audio_path, output_dir)
+    bufs = init_buffers()
+    transcript_parts = bufs["transcript_parts"]
+    srt_content = bufs["srt_content"]
+    vtt_content = bufs["vtt_content"]
+    segments_json = bufs["segments_json"]
+    words_data = bufs["words_data"]
+    output_files = bufs["output_files"]
+    detected_language = bufs["detected_language"]
+    language_probability = bufs["language_probability"]
 
     if split_segments:
         if verbose:
@@ -754,55 +737,25 @@ def transcribe_audio(
         if show_in_terminal and display_text:
             print(f"[{seg_start:.2f}s -> {seg_end:.2f}s] {display_text}")
 
-    # 寫入標準輸出文件
-
-    # 純文本輸出
-    txt_path = base_output_path / f"{base_filename}.txt"
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(transcript_parts))
-    output_files["txt"] = str(txt_path)
-
-    # 根據請求的格式輸出其他格式
-    if output_format == "srt" or output_format == "all":
-        srt_path = base_output_path / f"{base_filename}.srt"
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write(srt_content)
-        output_files["srt"] = str(srt_path)
-
-    if output_format == "vtt" or output_format == "all":
-        vtt_path = base_output_path / f"{base_filename}.vtt"
-        with open(vtt_path, "w", encoding="utf-8") as f:
-            f.write(vtt_content)
-        output_files["vtt"] = str(vtt_path)
-
-    full_transcript = "\n".join(transcript_parts)
-
-    # Collect unique speakers for JSON metadata
     speakers_detected = sorted(
         {seg.get("speaker") for seg in segments_json if seg.get("speaker")}
     )
-
-    json_data = {
-        "text": full_transcript,
-        "segments": segments_json,
-        "language": detected_language,
-        "language_probability": language_probability,
-        "words": words_data if words_data else None,
-        "speakers": speakers_detected if speakers_detected else None,
-    }
-
-    json_path = base_output_path / f"{base_filename}.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(json_data, f, ensure_ascii=False, indent=2)
-    output_files["json"] = str(json_path)
-
-    # 如果需要在終端顯示完整結果但不是實時顯示片段
-    if show_in_terminal and verbose and len(segments_json) == 0 and full_transcript:
-        print("\n" + "=" * 50)
-        print("轉錄結果:")
-        print("=" * 50)
-        print(full_transcript)
-        print("=" * 50 + "\n")
+    write_output_files(
+        base_output_path,
+        base_filename,
+        output_format,
+        transcript_parts,
+        srt_content,
+        vtt_content,
+        segments_json,
+        words_data,
+        detected_language,
+        language_probability,
+        output_files,
+        speakers=speakers_detected if speakers_detected else None,
+        verbose=verbose,
+        show_in_terminal=show_in_terminal,
+    )
 
     maybe_prepare_video_output(
         audio_path,

@@ -76,19 +76,12 @@ pip install -r requirements-dev.txt
 接著可以執行：
 
 ```bash
-# 執行目前的回歸測試
-python -m pytest tests/test_models.py tests/test_task_persistence.py tests/test_subtitle_api_smoke.py tests/test_subtitle_api_store.py tests/test_video_utils.py -q
+# 執行所有回歸測試
+python -m pytest tests/ -q
 
-# 檢查測試檔與 shared helper 的基本 lint
-python -m flake8 tests backend/shared/video_utils.py
+# 檢查 lint（測試、shared helpers、services、models）
+python -m flake8 tests backend/shared backend/services backend/models.py backend/task_persistence.py
 ```
-
-目前這批測試主要保護：
-
-- `backend/models.py` 的基礎驗證行為
-- `backend/task_persistence.py` 的 round-trip / rebuild 行為
-- `backend/services/subtitle_api.py` 的最小 smoke path 與 task store 初始化行為
-- `backend/shared/video_utils.py` 的影片判斷與 FFmpeg command 建構
 
 ### Docker 部署（推薦）
 

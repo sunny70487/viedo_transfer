@@ -1,8 +1,8 @@
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from backend.shared.media_config import VIDEO_EXTENSIONS, get_media_type
 
@@ -27,13 +27,11 @@ async def download_result(task_id: str, file_type: str, request: Request):
     tasks = get_download_task_registry()
 
     if task_id not in tasks:
-        return JSONResponse(status_code=404, content={"error": "任務不存在"})
+        raise HTTPException(status_code=404, detail="任務不存在")
 
     task = tasks[task_id]
     if task.status != "completed" or not task.result:
-        return JSONResponse(
-            status_code=400, content={"error": "任務尚未完成或沒有結果"}
-        )
+        raise HTTPException(status_code=400, detail="任務尚未完成或沒有結果")
 
     if file_type in task.result["files"]:
         file_path = task.result["files"][file_type]
@@ -56,14 +54,14 @@ async def download_result(task_id: str, file_type: str, request: Request):
         if video_file_path:
             file_path = video_file_path
         else:
-            return JSONResponse(status_code=404, content={"error": "找不到影片文件"})
+            raise HTTPException(status_code=404, detail="找不到影片文件")
     else:
-        return JSONResponse(
-            status_code=404, content={"error": f"找不到 {file_type} 格式的結果文件"}
+        raise HTTPException(
+            status_code=404, detail=f"找不到 {file_type} 格式的結果文件"
         )
 
     if not os.path.exists(file_path):
-        return JSONResponse(status_code=404, content={"error": "文件不存在"})
+        raise HTTPException(status_code=404, detail="文件不存在")
 
     media_type = get_media_type(file_path)
     download_filename = os.path.basename(file_path)

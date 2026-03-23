@@ -4,67 +4,72 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()  # 載入 .env 中的環境變數（如 HF_TOKEN）
+load_dotenv()
 
+import json
+import logging
+import platform
+import shutil
+import subprocess
+import threading
 import time
 import uuid
-import threading
-import uvicorn
-import logging
-from typing import List, Optional, Dict, Any
 from pathlib import Path
+from typing import Dict, Any, Optional
+
+import uvicorn
 from fastapi import FastAPI, Request, Form, UploadFile, File, BackgroundTasks
-from fastapi.responses import (
-    JSONResponse,
-    HTMLResponse,
-    FileResponse,
-    StreamingResponse,
-)
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
-import shutil
-import json
 
-# 導入轉錄模組（雙引擎：Qwen3-ASR + FunASR）
-from backend.qwen3_asr_transcribe import transcribe_audio as _qwen3_transcribe
-from backend.funasr_transcribe import transcribe_audio as _funasr_transcribe
 from backend.funasr_transcribe import download_from_url, check_gpu
-
-# FunASR 專屬模型名稱（選到這些時走 FunASR 引擎）
-_FUNASR_MODEL_NAMES = {
-    "paraformer-zh",
-    "paraformer",
-    "sensevoice",
-    "SenseVoiceSmall",
-    "iic/SenseVoiceSmall",
-    "large-v3",
-    "whisper-large-v3",
-    "Whisper-large-v3",
-    "large-v3-turbo",
-    "whisper-large-v3-turbo",
-    "Whisper-large-v3-turbo",
-    "fun-asr-nano",
-    "nano",
-    "FunAudioLLM/Fun-ASR-Nano-2512",
-}
-
-
-def transcribe_audio(**kwargs):
-    """根據 model_size 自動路由到 Qwen3-ASR 或 FunASR 引擎"""
-    model_size = kwargs.get("model_size", "qwen3-asr-1.7b")
-    if model_size in _FUNASR_MODEL_NAMES:
-        return _funasr_transcribe(**kwargs)
-    return _qwen3_transcribe(**kwargs)
-
-
-# 導入任務持久化模組
+from backend.models import (
+    Word,
+    Subtitle,
+    SubtitleCollection,
+    RetranscribeRequest,
+    VideoInfo,
+    SubtitleMetadata,
+    RetranscribeTask,
+    SubtitleExportRequest,
+)
+from backend.shared.engine_routing import transcribe_audio
 from backend.task_persistence import TaskPersistence
-
-# 系統相關導入
-import platform
-import subprocess
-from fastapi.middleware.cors import CORSMiddleware
+from backend.shared.media_config import SUPPORTED_MEDIA_EXTENSIONS
+from backend.services.download_api import (
+    router as download_router,
+    set_download_task_registry,
+)
+from backend.services.progress_policy import next_progress_state
+from backend.services.subtitle_api import (
+    router as subtitle_router,
+    set_task_store,
+    TaskStore,
+)
+from backend.services.system_api import router as system_router
+from backend.services.task_api import router as task_router, set_task_registry
+from backend.services.transcription_launcher import (
+    create_task_entry,
+    start_transcription_thread,
+)
+from backend.services.transcription_orchestrator import (
+    finalize_task_success,
+    resolve_output_directory,
+)
+from backend.services.transcription_progress import (
+    estimate_total_steps,
+    build_status_callback,
+    finalize_task_failure,
+)
+from backend.services.upload_preprocessing import (
+    validate_upload_filename,
+    save_uploaded_file,
+    build_transcription_request,
+)
+from backend.services.url_preprocessing import prepare_url_input
 
 # 設置日誌
 logging.basicConfig(
@@ -177,19 +182,6 @@ class TranscriptionRequest(BaseModel):
     file_path: Optional[str] = None  # 添加本地文件路徑
     speaker_diarization: bool = False  # 啟用說話者辨識
     num_speakers: Optional[int] = None  # 說話者人數（None 為自動偵測）
-
-
-# 導入字幕相關資料模型
-from backend.models import (
-    Word,
-    Subtitle,
-    SubtitleCollection,
-    RetranscribeRequest,
-    VideoInfo,
-    SubtitleMetadata,
-    RetranscribeTask,
-    SubtitleExportRequest,
-)
 
 
 # 轉錄任務處理函數
@@ -510,189 +502,6 @@ async def transcribe_from_upload(
         return JSONResponse(
             status_code=500, content={"error": f"處理上傳請求時出錯: {str(e)}"}
         )
-
-
-@app.get("/download/{task_id}/{file_type}")
-async def download_result(task_id: str, file_type: str, request: Request):
-    """下載或串流轉錄結果文件（支持影片範圍請求）"""
-    if task_id not in tasks:
-        return JSONResponse(status_code=404, content={"error": "任務不存在"})
-
-    task = tasks[task_id]
-    if task.status != "completed" or not task.result:
-        return JSONResponse(
-            status_code=400, content={"error": "任務尚未完成或沒有結果"}
-        )
-
-    # 定義影片文件擴展名（在函數開頭定義，避免作用域問題）
-    video_extensions = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
-
-    # 嘗試直接匹配文件類型
-    if file_type in task.result["files"]:
-        file_path = task.result["files"][file_type]
-    # 如果請求的是 'video'，嘗試找到任何影片文件
-    elif file_type == "video":
-        video_file_path = None
-
-        # 先檢查常見的影片鍵名
-        for video_key in ["video", "mp4", "avi", "mov", "mkv", "webm"]:
-            if video_key in task.result["files"]:
-                video_file_path = task.result["files"][video_key]
-                break
-
-        # 如果還沒找到，遍歷所有文件
-        if not video_file_path:
-            for key, path in task.result["files"].items():
-                if isinstance(path, str):
-                    ext = os.path.splitext(path)[1].lower()
-                    if ext in video_extensions:
-                        video_file_path = path
-                        break
-
-        if video_file_path:
-            file_path = video_file_path
-        else:
-            return JSONResponse(status_code=404, content={"error": "找不到影片文件"})
-    else:
-        return JSONResponse(
-            status_code=404, content={"error": f"找不到 {file_type} 格式的結果文件"}
-        )
-
-    # 確保文件存在
-    if not os.path.exists(file_path):
-        return JSONResponse(status_code=404, content={"error": "文件不存在"})
-
-    # 根據文件類型設置正確的 media_type
-    ext = os.path.splitext(file_path)[1].lower()
-    media_types = {
-        ".mp4": "video/mp4",
-        ".webm": "video/webm",
-        ".mkv": "video/x-matroska",
-        ".avi": "video/x-msvideo",
-        ".mov": "video/quicktime",
-        ".flv": "video/x-flv",
-        ".wmv": "video/x-ms-wmv",
-        ".m4v": "video/x-m4v",
-    }
-    media_type = media_types.get(ext, "application/octet-stream")
-
-    # 統一使用 FileResponse（Starlette 的 FileResponse 已內建 HTTP Range 支持，
-    # 能正確處理影片的 seek/暫停/拖動，避免自訂 StreamingResponse 導致的黑屏問題）
-    download_filename = os.path.basename(file_path)
-    logger.info(
-        f"提供檔案: {file_path}, filename: {download_filename}, media_type: {media_type}"
-    )
-    return FileResponse(
-        path=file_path,
-        filename=download_filename,
-        media_type=media_type,
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "public, max-age=3600",
-        },
-    )
-
-
-async def stream_video_with_range(file_path: str, media_type: str, request: Request):
-    """支持 HTTP Range 請求的影片串流"""
-    file_size = os.path.getsize(file_path)
-
-    # 獲取 Range 請求頭
-    range_header = request.headers.get("range")
-
-    if not range_header:
-        # 沒有 Range 請求，返回完整文件
-        def iterfile():
-            with open(file_path, "rb") as f:
-                chunk_size = 1024 * 1024  # 1MB chunks
-                while chunk := f.read(chunk_size):
-                    yield chunk
-
-        return StreamingResponse(
-            iterfile(),
-            media_type=media_type,
-            headers={
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(file_size),
-                "Content-Type": media_type,
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-cache",
-            },
-        )
-
-    # 解析 Range 請求（格式: bytes=start-end）
-    try:
-        range_str = range_header.replace("bytes=", "")
-        range_parts = range_str.split("-")
-        start = int(range_parts[0]) if range_parts[0] else 0
-        end = (
-            int(range_parts[1])
-            if len(range_parts) > 1 and range_parts[1]
-            else file_size - 1
-        )
-
-        # 確保範圍有效
-        start = max(0, start)
-        end = min(file_size - 1, end)
-        content_length = end - start + 1
-
-        logger.info(
-            f"範圍請求: bytes {start}-{end}/{file_size} ({content_length} bytes)"
-        )
-
-        # 生成指定範圍的內容
-        def iterfile_range():
-            with open(file_path, "rb") as f:
-                f.seek(start)
-                remaining = content_length
-                chunk_size = 1024 * 1024  # 1MB chunks
-
-                while remaining > 0:
-                    chunk_to_read = min(chunk_size, remaining)
-                    chunk = f.read(chunk_to_read)
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-                    yield chunk
-
-        # 返回 206 Partial Content 響應
-        return StreamingResponse(
-            iterfile_range(),
-            status_code=206,
-            media_type=media_type,
-            headers={
-                "Content-Range": f"bytes {start}-{end}/{file_size}",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(content_length),
-                "Content-Type": media_type,
-                "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "no-cache",
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"處理 Range 請求時出錯: {str(e)}")
-        # 如果解析失敗，返回完整文件
-        return FileResponse(path=file_path, media_type=media_type)
-
-
-# 導入字幕 API 模組
-from backend.services.subtitle_api import (
-    router as subtitle_router,
-    set_task_store,
-    TaskStore,
-)
-from backend.services.download_api import (
-    router as download_router,
-    set_download_task_registry,
-)
-from backend.services.system_api import router as system_router
-from backend.services.task_api import router as task_router, set_task_registry
-from backend.services.transcription_orchestrator import (
-    finalize_task_success,
-    resolve_output_directory,
-)
-from backend.services.url_preprocessing import prepare_url_input
 
 
 # 字幕編輯器相關 API 端點

@@ -12,7 +12,9 @@ def format_timestamp(seconds, format="srt"):
     return f"{hours:02d}:{minutes:02d}:{secs:06.3f}"
 
 
-def check_gpu(torch_module):
+def check_gpu(torch_module=None):
+    if torch_module is None:
+        import torch as torch_module
     gpu_info = {
         "available": torch_module.cuda.is_available(),
         "device_count": torch_module.cuda.device_count(),
