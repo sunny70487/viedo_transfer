@@ -67,4 +67,4 @@ def test_download_route_returns_404_for_missing_result_file():
     response = client.get("/download/missing/srt")
 
     assert response.status_code == 404
-    assert response.json() == {"error": "任務不存在"}
+    assert response.json() == {"detail": "任務不存在"}

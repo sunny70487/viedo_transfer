@@ -18,7 +18,6 @@ def test_create_task_entry_registers_task_and_persists(monkeypatch):
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
-    monkeypatch.setattr(launcher, "Task", _TaskStub)
     monkeypatch.setattr(launcher.uuid, "uuid4", lambda: "task-1")
     monkeypatch.setattr(launcher.time, "time", lambda: 123.0)
 
@@ -29,6 +28,7 @@ def test_create_task_entry_registers_task_and_persists(monkeypatch):
         tasks=tasks,
         save_task=_save,
         source_name="demo.wav",
+        task_cls=_TaskStub,
     )
 
     assert task.id == "task-1"

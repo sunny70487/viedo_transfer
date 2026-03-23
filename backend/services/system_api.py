@@ -3,7 +3,7 @@ import platform
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.funasr_transcribe import check_gpu
+from backend.shared.transcribe_helpers import check_gpu
 
 router = APIRouter(tags=["system"])
 
