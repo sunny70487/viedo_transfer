@@ -5,23 +5,20 @@ __pycache__/
 *.pyo
 .ruff_cache/
 
-# Node (dev tools only — React build output is copied separately)
+# Node — only exclude node_modules (source needed for multi-stage build)
 node_modules/
 frontend-react/node_modules/
-frontend-react/src/
-frontend-react/*.ts
-frontend-react/*.json
-frontend-react/*.html
+frontend-react/dist/
 
 # IDE / Editor
 .ace-tool/
 .vscode/
+.cursor/
 .idea/
 *.swp
 *.swo
 
 # Docker 自身
-Dockerfile
 docker-compose.yml
 .dockerignore
 
@@ -33,8 +30,10 @@ tasks_data.json
 whisper_app.log
 nul
 
-# 文件
-*.md
+# 文件（保留 README 以外的 .md）
+docs/
+AGENTS.md
+CHANGELOG.md
 
 # 本地模型（由 volume 獨立掛載）
 faster-whisper-large-v3-zh-TW/
@@ -42,6 +41,13 @@ faster-whisper-large-v3-zh-TW/
 # Git
 .git/
 .gitignore
+
+# Trellis / Claude config
+.trellis/
+.claude/
+
+# Tests (not needed in production image)
+tests/
 
 # Legacy root-level files (already in backend/ and frontend/)
 /app.py

@@ -45,17 +45,17 @@ export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek }: Sub
         'group flex gap-3 px-4 py-2.5 border-b border-border/50 dark:border-border-dark/50 transition-colors cursor-pointer',
         isActive ? 'bg-primary/10 dark:bg-primary/10 border-l-2 border-l-primary' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50 border-l-2 border-l-transparent'
       )}
-      onClick={onSelect}
+      onClick={() => {
+        if (!editing) {
+          onSelect()
+          onSeek(subtitle.start_time)
+        }
+      }}
     >
       <div className="shrink-0 w-16 text-right">
-        <button
-          type="button"
-          className="text-xs font-mono text-primary/80 hover:text-primary cursor-pointer"
-          onClick={(e) => { e.stopPropagation(); onSeek(subtitle.start_time) }}
-          title="跳轉到此時間"
-        >
+        <span className="text-xs font-mono text-primary/80 hover:text-primary cursor-pointer">
           {formatTimestamp(subtitle.start_time)}
-        </button>
+        </span>
         <p className="text-xs font-mono text-muted dark:text-muted-dark mt-0.5">
           {formatTimestamp(subtitle.end_time)}
         </p>

@@ -12,10 +12,10 @@ __pycache__/
 .ruff_cache/
 .worktrees/
 
-# Node (dev tools only)
+# Node
 node_modules/
-package.json
-package-lock.json
+/package.json
+/package-lock.json
 
 # Runtime data
 outputs/

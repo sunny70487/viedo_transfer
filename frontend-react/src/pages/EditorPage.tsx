@@ -50,6 +50,14 @@ export function EditorPage() {
     return -1
   }, [subtitles, videoTime])
 
+  const prevActiveRef = useRef(-1)
+  useEffect(() => {
+    if (activeIndex >= 0 && activeIndex !== prevActiveRef.current && !searchTerm.trim()) {
+      virtualizer.scrollToIndex(activeIndex, { align: 'center', behavior: 'smooth' })
+    }
+    prevActiveRef.current = activeIndex
+  }, [activeIndex, virtualizer, searchTerm])
+
   const handleSave = useCallback(() => {
     if (!data) return
     saveMutation.mutate(
@@ -68,9 +76,8 @@ export function EditorPage() {
     return () => window.removeEventListener('keydown', handleKey)
   }, [handleSave])
 
-  const videoSrc = data?.metadata?.video_url
-    ? (data.metadata.video_url.startsWith('/') ? data.metadata.video_url : api.downloadFile(taskId, 'video'))
-    : undefined
+  const videoSrc = data?.metadata?.video_info?.video_url
+    || api.downloadFile(taskId, 'video')
 
   if (isLoading) {
     return (
@@ -93,14 +100,14 @@ export function EditorPage() {
         <h1 className="text-xl font-semibold text-text dark:text-text-dark">
           字幕編輯器
         </h1>
-        {data?.metadata?.original_file && (
-          <span className="text-sm text-muted dark:text-muted-dark truncate">— {data.metadata.original_file}</span>
+        {data?.metadata?.video_info?.format && (
+          <span className="text-sm text-muted dark:text-muted-dark truncate">— {data.metadata.video_info.format.toUpperCase()}</span>
         )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
-          <VideoPlayer ref={videoRef} src={videoSrc} onTimeUpdate={setVideoTime} />
+          <VideoPlayer ref={videoRef} src={videoSrc} subtitles={subtitles} onTimeUpdate={setVideoTime} />
           <Card className="p-4">
             <div className="grid grid-cols-3 gap-4 text-center text-sm">
               <div>
@@ -113,7 +120,7 @@ export function EditorPage() {
               </div>
               <div>
                 <p className="text-muted dark:text-muted-dark">模型</p>
-                <p className="text-lg font-semibold text-text dark:text-text-dark truncate">{data?.metadata?.model || '—'}</p>
+                <p className="text-lg font-semibold text-text dark:text-text-dark truncate">{data?.metadata?.model_used || '—'}</p>
               </div>
             </div>
           </Card>
@@ -138,7 +145,10 @@ export function EditorPage() {
                       index={realIndex}
                       isActive={realIndex === activeIndex}
                       onSelect={() => setSelectedIndex(realIndex)}
-                      onSeek={(t) => videoRef.current?.seek(t)}
+                      onSeek={(t) => {
+                        videoRef.current?.seek(t)
+                        videoRef.current?.play()
+                      }}
                     />
                   </div>
                 )

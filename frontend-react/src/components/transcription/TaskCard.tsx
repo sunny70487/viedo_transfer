@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ChevronDown, Trash2, ExternalLink, Download } from 'lucide-react'
+import { ChevronDown, Trash2, FileText, Download } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
@@ -60,13 +60,6 @@ export function TaskCard({ task }: TaskCardProps) {
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {isCompleted && (
-              <Link to={`/editor/${task.id}`}>
-                <Button variant="ghost" size="icon" title="編輯字幕">
-                  <ExternalLink className="h-4 w-4" />
-                </Button>
-              </Link>
-            )}
             {(isCompleted || isFailed) && (
               <Button
                 variant="ghost"
@@ -90,6 +83,15 @@ export function TaskCard({ task }: TaskCardProps) {
 
         {elapsed && (
           <p className="text-xs text-muted dark:text-muted-dark mt-1.5">{elapsed}</p>
+        )}
+
+        {isCompleted && (
+          <Link to={`/editor/${task.id}`} className="block mt-3">
+            <Button variant="primary" size="sm" className="w-full">
+              <FileText className="h-4 w-4" />
+              開啟字幕編輯器
+            </Button>
+          </Link>
         )}
       </div>
 

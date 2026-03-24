@@ -15,16 +15,24 @@ export interface Subtitle {
   confidence?: number
 }
 
-export interface SubtitleMetadata {
-  task_id: string
-  model: string
-  language: string
+export interface VideoInfo {
   duration?: number
-  total_segments: number
-  created_at?: string
-  last_modified?: string
+  format?: string
+  resolution?: string
+  fps?: number
   video_url?: string
-  original_file?: string
+  file_size?: number
+}
+
+export interface SubtitleMetadata {
+  language?: string
+  model_used?: string
+  created_at?: number
+  last_modified?: number
+  total_duration?: number
+  total_segments?: number
+  video_info?: VideoInfo
+  transcription_settings?: Record<string, unknown>
 }
 
 export interface SubtitleCollection {
