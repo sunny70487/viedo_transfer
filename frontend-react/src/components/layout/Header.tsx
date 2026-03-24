@@ -48,7 +48,11 @@ export function Header() {
             <div className="flex items-center gap-2">
               <span className={`h-2.5 w-2.5 rounded-full ${gpuQuery.data.available ? 'bg-success' : 'bg-danger'}`} />
               <span className="font-medium text-text dark:text-text-dark">
-                {gpuQuery.data.available ? `可用 (${gpuQuery.data.device_count} 裝置)` : '不可用'}
+                {gpuQuery.data.available
+                  ? `可用 (${gpuQuery.data.device_count} 裝置)`
+                  : gpuQuery.data.device_count > 0
+                    ? `偵測到 ${gpuQuery.data.device_count} 裝置（CUDA 未就緒）`
+                    : '不可用'}
               </span>
             </div>
             {gpuQuery.data.devices.map((dev, i) => (
