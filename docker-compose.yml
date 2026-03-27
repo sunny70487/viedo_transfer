@@ -1,10 +1,34 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: whisper-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: whisper_transfer
+      POSTGRES_USER: whisper
+      POSTGRES_PASSWORD: whisper_secret
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U whisper -d whisper_transfer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   whisper:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: whisper-transfer
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
       - "5000:5000"
     volumes:
@@ -12,13 +36,14 @@ services:
       - ./outputs:/app/outputs
       # 上傳檔案暫存
       - ./uploads:/app/uploads
-      # 任務記錄持久化
-      - ./tasks_data.json:/app/tasks_data.json
       # 模型快取（避免每次重啟重新下載）
       - whisper-models:/app/models
       # 若有本地微調模型，掛載進容器
       - ./faster-whisper-large-v3-zh-TW:/app/faster-whisper-large-v3-zh-TW:ro
     environment:
+      - DATABASE_URL=postgresql://whisper:whisper_secret@postgres:5432/whisper_transfer
+      # MAX_TRANSCRIPTION_WORKERS — 留空則自動偵測（GPU: VRAM÷6GB, CPU: cores÷2）
+      # - MAX_TRANSCRIPTION_WORKERS=2
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     # ---- GPU 配置 ----
@@ -40,3 +65,5 @@ services:
 volumes:
   whisper-models:
     name: whisper-model-cache
+  postgres-data:
+    name: whisper-postgres-data

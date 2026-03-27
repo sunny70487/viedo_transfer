@@ -731,12 +731,14 @@ async def delete_retranscribe_task(
         if task is None:
             raise HTTPException(status_code=404, detail="重新轉錄任務不存在")
 
-        if task.status not in ["completed", "failed"]:
-            raise HTTPException(status_code=400, detail="只能刪除已完成或失敗的任務")
+        was_active = task.status not in ["completed", "failed"]
+        if was_active:
+            task.status = "failed"
+            task.message = "任務已被使用者取消"
 
         retranscribe_service.delete_task(retranscribe_task_id)
 
-        return {"message": "重新轉錄任務已刪除"}
+        return {"message": "重新轉錄任務已取消並刪除" if was_active else "重新轉錄任務已刪除"}
 
     except HTTPException:
         raise

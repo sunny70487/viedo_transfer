@@ -43,9 +43,11 @@ RUN grep -v "pywin32" requirements.txt > /tmp/requirements_linux.txt \
     && pip install --no-cache-dir -r /tmp/requirements_linux.txt \
     && rm /tmp/requirements_linux.txt
 
+# 強制覆蓋為 CUDA 版 PyTorch（pip 預設裝的是 CPU 版，其他套件的依賴也會拉 CPU 版）
+RUN pip install --no-cache-dir --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+
 # ---- 應用程式碼 ----
 COPY backend/ ./backend/
-COPY frontend/ ./frontend/
 
 # 從 Stage 1 複製 React 建置產物
 COPY --from=frontend-build /build/dist/ ./frontend-react/dist/

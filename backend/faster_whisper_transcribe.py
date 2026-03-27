@@ -193,9 +193,17 @@ def transcribe_audio(
 
         segments_txt_path = base_output_path / f"{base_filename}_segments.txt"
         with open(segments_txt_path, "w", encoding="utf-8") as segments_file:
+            total_segs = len(segment_files)
             for i, segment_file in enumerate(segment_files):
                 if verbose:
-                    print(f"正在轉錄片段 {i + 1}/{len(segment_files)}: {segment_file}")
+                    print(f"正在轉錄片段 {i + 1}/{total_segs}: {segment_file}")
+
+                if status_callback:
+                    seg_progress = 30.0 + (i / total_segs) * 65.0
+                    status_callback(
+                        f"正在轉錄片段 {i + 1}/{total_segs}",
+                        progress=seg_progress,
+                    )
 
                 transcription_start = time.time()
                 segments, info = model.transcribe(
@@ -305,6 +313,13 @@ def transcribe_audio(
                 if verbose:
                     print(
                         f"片段 {i + 1} 轉錄完成，耗時: {time.time() - transcription_start:.2f} 秒"
+                    )
+
+                if status_callback:
+                    seg_progress = 30.0 + ((i + 1) / total_segs) * 65.0
+                    status_callback(
+                        f"片段 {i + 1}/{total_segs} 轉錄完成",
+                        progress=seg_progress,
                     )
 
         if temp_dir:

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
 import { useDeleteTask } from '@/hooks/use-tasks'
+import { useTaskStream } from '@/hooks/use-task-stream'
 import { api } from '@/api/client'
 import { cn, formatDuration } from '@/lib/utils'
 import { TASK_STATUS } from '@/lib/constants'
@@ -29,6 +30,8 @@ export function TaskCard({ task }: TaskCardProps) {
   const deleteMutation = useDeleteTask()
   const statusInfo = TASK_STATUS[task.status as StatusKey]
   const isActive = ['uploading', 'downloading', 'processing', 'transcribing', 'queued'].includes(task.status)
+
+  useTaskStream(task.id, isActive)
   const isCompleted = task.status === 'completed'
   const isFailed = task.status === 'failed'
 
@@ -60,17 +63,18 @@ export function TaskCard({ task }: TaskCardProps) {
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {(isCompleted || isFailed) && (
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => deleteMutation.mutate(task.id)}
-                loading={deleteMutation.isPending}
-                title="刪除"
-              >
-                <Trash2 className="h-4 w-4 text-danger" />
-              </Button>
-            )}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => {
+                const msg = isActive ? '任務正在處理中，確定要取消並刪除嗎？' : '確定要刪除這個任務嗎？'
+                if (globalThis.confirm(msg)) deleteMutation.mutate(task.id)
+              }}
+              loading={deleteMutation.isPending}
+              title={isActive ? '取消任務' : '刪除'}
+            >
+              <Trash2 className="h-4 w-4 text-danger" />
+            </Button>
             <Button variant="ghost" size="icon" onClick={() => setExpanded(!expanded)}>
               <ChevronDown className={cn('h-4 w-4 transition-transform', expanded && 'rotate-180')} />
             </Button>

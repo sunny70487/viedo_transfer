@@ -17,14 +17,14 @@ def build_split_progress_message(completed_segments, total_steps):
 
 def next_progress_state(
     *,
-    current_progress,
+    start_progress,
     target_progress,
     total_steps,
     step,
     is_split_mode,
 ):
-    progress_increment = (target_progress - current_progress) / total_steps
-    next_progress = min(target_progress, current_progress + progress_increment)
+    fraction = (step + 1) / total_steps
+    next_progress = min(target_progress, start_progress + fraction * (target_progress - start_progress))
 
     if is_split_mode:
         completed_segments = step + 1

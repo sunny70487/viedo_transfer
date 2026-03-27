@@ -56,6 +56,13 @@ export interface Task {
   start_time?: number
   end_time?: number
   source_name?: string
+  batch_id?: string
+}
+
+export interface BatchResponse {
+  batch_id: string
+  task_ids: string[]
+  errors?: string[]
 }
 
 export interface GpuDevice {

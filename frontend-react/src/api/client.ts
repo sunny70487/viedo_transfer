@@ -2,6 +2,7 @@ import type {
   Task, GpuInfo, DirectoryInfo, SubdirectoryItem,
   SubtitleCollection, TranscriptionRequest,
   RetranscribeRequest, RetranscribeTask,
+  BatchResponse,
 } from '@/types/api'
 
 const BASE = ''
@@ -37,6 +38,27 @@ export const api = {
           throw new Error(body.detail || 'Upload failed')
         }
         return res.json() as Promise<{ task_id: string }>
+      })
+  },
+
+  transcribeBatchUrls(data: { urls: string[] } & Record<string, unknown>) {
+    return request<BatchResponse>('/transcribe/batch/urls', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    })
+  },
+
+  transcribeBatchUpload(files: File[], params: Record<string, string>) {
+    const form = new FormData()
+    files.forEach((f) => form.append('files', f))
+    Object.entries(params).forEach(([k, v]) => form.append(k, v))
+    return fetch(`${BASE}/transcribe/batch/upload`, { method: 'POST', body: form })
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}))
+          throw new Error(body.detail || 'Batch upload failed')
+        }
+        return res.json() as Promise<BatchResponse>
       })
   },
 

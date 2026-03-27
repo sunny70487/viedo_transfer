@@ -37,33 +37,30 @@ def test_create_task_entry_registers_task_and_persists(monkeypatch):
     assert persisted["task_id"] == "task-1"
 
 
-def test_start_transcription_thread_calls_target_with_expected_args(monkeypatch):
+def test_submit_transcription_delegates_to_executor():
     launcher = _load_launcher_module()
 
     captured = {}
 
-    class _ThreadStub:
-        def __init__(self, target, args):
-            captured["target"] = target
+    class _FakeExecutor:
+        _threads = []
+
+        def submit(self, fn, *args):
+            captured["fn"] = fn
             captured["args"] = args
-            self.daemon = False
-
-        def start(self):
-            captured["started"] = True
-
-    monkeypatch.setattr(launcher.threading, "Thread", _ThreadStub)
+            return SimpleNamespace()
 
     def _target(*args):
         return args
 
-    launcher.start_transcription_thread(
+    launcher.submit_transcription(
+        executor=_FakeExecutor(),
         target=_target,
         task_id="task-1",
         file_path="input.wav",
         request=SimpleNamespace(model_size="qwen3-asr-1.7b"),
     )
 
-    assert captured["target"] is _target
+    assert captured["fn"] is _target
     assert captured["args"][0] == "task-1"
     assert captured["args"][1] == "input.wav"
-    assert captured["started"] is True

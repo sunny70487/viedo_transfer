@@ -457,9 +457,17 @@ def transcribe_audio(
 
         segments_txt_path = base_output_path / f"{base_filename}_segments.txt"
         with open(segments_txt_path, "w", encoding="utf-8") as segments_file:
+            total_segs = len(segment_files)
             for i, segment_file in enumerate(segment_files):
                 if verbose:
-                    print(f"正在轉錄片段 {i + 1}/{len(segment_files)}: {segment_file}")
+                    print(f"正在轉錄片段 {i + 1}/{total_segs}: {segment_file}")
+
+                if status_callback:
+                    seg_progress = 30.0 + (i / total_segs) * 65.0
+                    status_callback(
+                        f"正在轉錄片段 {i + 1}/{total_segs}",
+                        progress=seg_progress,
+                    )
 
                 transcription_start = time.time()
 
@@ -570,6 +578,13 @@ def transcribe_audio(
                         f"片段 {i + 1} 轉錄完成，耗時: {time.time() - transcription_start:.2f} 秒"
                     )
 
+                if status_callback:
+                    seg_progress = 30.0 + ((i + 1) / total_segs) * 65.0
+                    status_callback(
+                        f"片段 {i + 1}/{total_segs} 轉錄完成",
+                        progress=seg_progress,
+                    )
+
         if temp_dir:
             import shutil
 
@@ -580,7 +595,7 @@ def transcribe_audio(
         transcription_start = time.time()
 
         if status_callback:
-            status_callback("正在使用 Qwen3-ASR 進行轉錄...")
+            status_callback("正在使用 Qwen3-ASR 進行轉錄...", progress=30.0)
 
         # Run Qwen3-ASR
         results = model.transcribe(
@@ -588,6 +603,9 @@ def transcribe_audio(
             language=lang_name,
             return_time_stamps=word_timestamps,
         )
+
+        if status_callback:
+            status_callback("轉錄完成，正在生成輸出...", progress=90.0)
 
         if verbose:
             print(f"轉錄處理完成！共耗時: {time.time() - transcription_start:.2f} 秒")

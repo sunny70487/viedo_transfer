@@ -8,6 +8,10 @@ aiofiles>=23.1.0
 # 環境變數
 python-dotenv>=1.0.0
 
+# 資料庫
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
 # 系統相關依賴
 pywin32>=305; platform_system=="Windows"
 
@@ -15,6 +19,7 @@ pywin32>=305; platform_system=="Windows"
 funasr>=1.0.0
 modelscope>=1.9.0
 qwen-asr>=0.0.6
+# torch / torchaudio: Docker 內由 Dockerfile 單獨安裝 CUDA 版本
 torch>=2.0.0
 torchaudio>=2.0.0
 opencc-python-reimplemented>=0.1.7
