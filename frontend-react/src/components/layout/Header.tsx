@@ -1,14 +1,16 @@
 import { useState } from 'react'
-import { AudioWaveform, Cpu, Sun, Moon, Monitor } from 'lucide-react'
+import { AudioWaveform, Cpu, Sun, Moon, Monitor, Settings } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/Dialog'
+import { LlmSettingsDialog } from '@/components/ui/LlmSettingsDialog'
 import { useThemeStore } from '@/stores/theme-store'
 import { useGpuInfo } from '@/hooks/use-gpu-info'
 
 export function Header() {
   const { mode, setMode } = useThemeStore()
   const [gpuOpen, setGpuOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const gpuQuery = useGpuInfo(gpuOpen)
 
   const ThemeIcon = mode === 'dark' ? Moon : mode === 'light' ? Sun : Monitor
@@ -25,6 +27,15 @@ export function Header() {
             <Button
               variant="ghost"
               size="icon"
+              onClick={() => setSettingsOpen(true)}
+              title="LLM API 設定"
+              aria-label="LLM API 設定"
+            >
+              <Settings className="h-5 w-5" aria-hidden="true" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setMode(mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark')}
               title={`主題: ${mode === 'dark' ? '深色' : mode === 'light' ? '淺色' : '系統'}`}
             >
@@ -37,6 +48,8 @@ export function Header() {
           </div>
         </div>
       </header>
+
+      <LlmSettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <Dialog open={gpuOpen} onClose={() => setGpuOpen(false)} title="GPU 狀態">
         {gpuQuery.isLoading ? (
