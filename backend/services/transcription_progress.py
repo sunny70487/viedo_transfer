@@ -19,11 +19,17 @@ def estimate_total_steps(
 
 
 def build_status_callback(*, task, save_task):
-    def status_callback(message, progress=None):
-        task.message = message
+    def status_callback(message=None, progress=None, segment=None):
+        if message is not None:
+            task.message = message
         if progress is not None:
             task.progress = progress
-        save_task(task)
+        if segment is not None:
+            if task.partial_segments is None:
+                task.partial_segments = []
+            task.partial_segments.append(segment)
+        if message is not None or progress is not None:
+            save_task(task)
 
     return status_callback
 

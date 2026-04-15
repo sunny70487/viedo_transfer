@@ -57,6 +57,10 @@ from backend.services.subtitle_api import (
 )
 from backend.services.system_api import router as system_router
 from backend.services.task_api import router as task_router, set_task_registry
+from backend.services.folder_api import (
+    router as folder_router,
+    set_folder_task_registry,
+)
 from backend.services.transcription_launcher import (
     create_task_entry,
     submit_transcription,
@@ -171,6 +175,9 @@ class Task(BaseModel):
     end_time: Optional[float] = None
     source_name: Optional[str] = None
     batch_id: Optional[str] = None
+    folder_id: Optional[str] = None
+    sort_order: float = 0.0
+    partial_segments: Optional[List[Dict[str, Any]]] = None
 
 
 class TranscriptionRequest(BaseModel):
@@ -192,6 +199,12 @@ class TranscriptionRequest(BaseModel):
     file_path: Optional[str] = None
     speaker_diarization: bool = False
     num_speakers: Optional[int] = None
+    llm_enhance: bool = False
+    llm_api_key: Optional[str] = None
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o-mini"
+    llm_content_hint: Optional[str] = None
+    folder_id: Optional[str] = None
 
 
 class BatchUrlRequest(BaseModel):
@@ -211,6 +224,17 @@ class BatchUrlRequest(BaseModel):
     segment_duration: int = 30
     speaker_diarization: bool = False
     num_speakers: Optional[int] = None
+    llm_enhance: bool = False
+    llm_api_key: Optional[str] = None
+    llm_base_url: str = "https://api.openai.com/v1"
+    llm_model: str = "gpt-4o-mini"
+    llm_content_hint: Optional[str] = None
+    folder_id: Optional[str] = None
+
+
+class LlmModelsRequest(BaseModel):
+    api_key: str
+    base_url: str = "https://api.openai.com/v1"
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +285,76 @@ logger.info(f"任務數據初始化完成，共載入 {len(tasks)} 個任務")
 # ---------------------------------------------------------------------------
 # Background transcription worker
 # ---------------------------------------------------------------------------
+def _apply_llm_enhancement(
+    transcription_results: Dict[str, Any],
+    request: TranscriptionRequest,
+    status_callback,
+):
+    """Read the JSON output, merge short segments, enhance with LLM, and rewrite all output files."""
+    from backend.shared.llm_postprocess import enhance_subtitles, merge_short_segments, resplit_long_segments
+    from backend.shared.transcription_pipeline import (
+        build_srt_entry,
+        build_vtt_entry,
+    )
+
+    json_path = transcription_results.get("json")
+    if not json_path or not os.path.isfile(json_path):
+        logger.warning("No JSON output found — skipping LLM enhancement")
+        return
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    segments = data.get("segments", [])
+    if not segments:
+        return
+
+    orig_count = len(segments)
+    segments = merge_short_segments(segments)
+    if len(segments) < orig_count:
+        logger.info(
+            "Merged %d short segments (%d → %d)",
+            orig_count - len(segments), orig_count, len(segments),
+        )
+
+    enhanced = enhance_subtitles(
+        segments,
+        api_key=request.llm_api_key,
+        base_url=request.llm_base_url,
+        model=request.llm_model,
+        content_hint=request.llm_content_hint,
+        status_callback=status_callback,
+    )
+
+    enhanced = resplit_long_segments(enhanced)
+    data["segments"] = enhanced
+    data["text"] = "\n".join(seg["text"] for seg in enhanced if seg.get("text"))
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    txt_path = transcription_results.get("txt")
+    if txt_path and os.path.isfile(txt_path):
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(data["text"])
+
+    srt_path = transcription_results.get("srt")
+    if srt_path and os.path.isfile(srt_path):
+        srt_content = ""
+        for idx, seg in enumerate(enhanced, 1):
+            srt_content += build_srt_entry(idx, seg["start"], seg["end"], seg["text"])
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+
+    vtt_path = transcription_results.get("vtt")
+    if vtt_path and os.path.isfile(vtt_path):
+        vtt_content = "WEBVTT\n\n"
+        for seg in enhanced:
+            vtt_content += build_vtt_entry(seg["start"], seg["end"], seg["text"])
+        with open(vtt_path, "w", encoding="utf-8") as f:
+            f.write(vtt_content)
+
+
 def process_transcription(
     task_id: str, file_path: str = None, request: TranscriptionRequest = None
 ):
@@ -313,6 +407,12 @@ def process_transcription(
             speaker_diarization=request.speaker_diarization,
             num_speakers=request.num_speakers,
         )
+
+        if request.llm_enhance and request.llm_api_key:
+            try:
+                _apply_llm_enhancement(transcription_results, request, status_callback)
+            except Exception as llm_err:
+                logger.warning("LLM enhancement failed (non-fatal): %s", llm_err)
 
         finalize_task_success(
             task=task,
@@ -396,6 +496,7 @@ async def transcribe_from_url(request: TranscriptionRequest):
         tasks=tasks,
         save_task=save_task_to_disk,
         source_name=request.url,
+        folder_id=request.folder_id,
     )
 
     submit_transcription(
@@ -464,6 +565,12 @@ async def transcribe_from_upload(
     output_dir: Optional[str] = Form(None),
     speaker_diarization: bool = Form(False),
     num_speakers: Optional[int] = Form(None),
+    llm_enhance: bool = Form(False),
+    llm_api_key: Optional[str] = Form(None),
+    llm_base_url: str = Form("https://api.openai.com/v1"),
+    llm_model: str = Form("gpt-4o-mini"),
+    llm_content_hint: Optional[str] = Form(None),
+    folder_id: Optional[str] = Form(None),
 ):
     """從上傳的文件創建轉錄任務"""
     try:
@@ -475,6 +582,7 @@ async def transcribe_from_upload(
             tasks=tasks,
             save_task=save_task_to_disk,
             source_name=file.filename,
+            folder_id=folder_id,
         )
         task_obj.status = "uploading"
         task_obj.message = "正在上傳文件"
@@ -508,6 +616,11 @@ async def transcribe_from_upload(
             output_dir=output_dir,
             speaker_diarization=speaker_diarization,
             num_speakers=num_speakers,
+            llm_enhance=llm_enhance,
+            llm_api_key=llm_api_key,
+            llm_base_url=llm_base_url,
+            llm_model=llm_model,
+            llm_content_hint=llm_content_hint,
         )
 
         submit_transcription(
@@ -550,6 +663,7 @@ async def transcribe_batch_urls(request: BatchUrlRequest):
             save_task=save_task_to_disk,
             source_name=url,
             batch_id=batch_id,
+            folder_id=request.folder_id,
         )
         req = TranscriptionRequest(url=url, **shared_opts)
         submit_transcription(
@@ -582,6 +696,12 @@ async def transcribe_batch_upload(
     output_dir: Optional[str] = Form(None),
     speaker_diarization: bool = Form(False),
     num_speakers: Optional[int] = Form(None),
+    llm_enhance: bool = Form(False),
+    llm_api_key: Optional[str] = Form(None),
+    llm_base_url: str = Form("https://api.openai.com/v1"),
+    llm_model: str = Form("gpt-4o-mini"),
+    llm_content_hint: Optional[str] = Form(None),
+    folder_id: Optional[str] = Form(None),
 ):
     """一次上傳多個檔案進行批次轉錄"""
     if not files:
@@ -599,11 +719,13 @@ async def transcribe_batch_upload(
             errors.append(f"{file.filename}: {error}")
             continue
 
+        display_name = Path(file.filename).name if file.filename else file.filename
         task_obj = create_task_entry(
             tasks=tasks,
             save_task=save_task_to_disk,
-            source_name=file.filename,
+            source_name=display_name,
             batch_id=batch_id,
+            folder_id=folder_id,
         )
         task_obj.status = "uploading"
         task_obj.message = "正在上傳文件"
@@ -639,6 +761,11 @@ async def transcribe_batch_upload(
             output_dir=output_dir,
             speaker_diarization=speaker_diarization,
             num_speakers=num_speakers,
+            llm_enhance=llm_enhance,
+            llm_api_key=llm_api_key,
+            llm_base_url=llm_base_url,
+            llm_model=llm_model,
+            llm_content_hint=llm_content_hint,
         )
 
         submit_transcription(
@@ -652,6 +779,147 @@ async def transcribe_batch_upload(
 
     logger.info("Batch %s created with %d file task(s)", batch_id, len(task_ids))
     result: Dict[str, Any] = {"batch_id": batch_id, "task_ids": task_ids}
+    if errors:
+        result["errors"] = errors
+    return result
+
+
+@app.post("/transcribe/batch/folder-upload")
+async def transcribe_folder_upload(
+    files: List[UploadFile] = File(...),
+    relative_paths: str = Form("[]"),
+    folder_name: str = Form(""),
+    model_size: str = Form("qwen3-asr-1.7b"),
+    device: str = Form("auto"),
+    compute_type: str = Form("default"),
+    language: Optional[str] = Form(None),
+    task: str = Form("transcribe"),
+    beam_size: int = Form(5),
+    vad_filter: bool = Form(True),
+    word_timestamps: bool = Form(True),
+    output_format: str = Form("srt"),
+    split_segments: bool = Form(False),
+    segment_duration: int = Form(30),
+    output_dir: Optional[str] = Form(None),
+    speaker_diarization: bool = Form(False),
+    num_speakers: Optional[int] = Form(None),
+    llm_enhance: bool = Form(False),
+    llm_api_key: Optional[str] = Form(None),
+    llm_base_url: str = Form("https://api.openai.com/v1"),
+    llm_model: str = Form("gpt-4o-mini"),
+    llm_content_hint: Optional[str] = Form(None),
+):
+    """Upload files from a folder scan, create a folder, and transcribe each file."""
+    import time as _time
+    from backend.database import SessionLocal as _Session, FolderRecord
+
+    if not files:
+        return JSONResponse(status_code=400, content={"error": "至少需要上傳一個檔案"})
+
+    name = folder_name.strip() or "未命名資料夾"
+    now = _time.time()
+    folder_id = str(uuid.uuid4())
+    try:
+        with _Session() as session:
+            session.add(FolderRecord(id=folder_id, name=name, created_at=now, updated_at=now))
+            session.commit()
+    except Exception as e:
+        logger.error("Failed to create folder for upload: %s", e)
+        return JSONResponse(status_code=500, content={"error": f"建立資料夾失敗: {e}"})
+
+    batch_id = str(uuid.uuid4())
+    task_ids: list[str] = []
+    errors: list[str] = []
+
+    import re as _re
+
+    def _natural_sort_key(name: str):
+        return [
+            int(part) if part.isdigit() else part.lower()
+            for part in _re.split(r'(\d+)', name)
+        ]
+
+    indexed_files = sorted(
+        enumerate(files),
+        key=lambda pair: _natural_sort_key(
+            Path(pair[1].filename).name if pair[1].filename else ""
+        ),
+    )
+
+    for sort_idx, (_, file) in enumerate(indexed_files):
+        valid, error = validate_upload_filename(file.filename)
+        if not valid:
+            errors.append(f"{file.filename}: {error}")
+            continue
+
+        display_name = Path(file.filename).name if file.filename else file.filename
+        task_obj = create_task_entry(
+            tasks=tasks,
+            save_task=save_task_to_disk,
+            source_name=display_name,
+            batch_id=batch_id,
+            folder_id=folder_id,
+        )
+        task_obj.sort_order = float(sort_idx)
+        task_obj.status = "uploading"
+        task_obj.message = "正在上傳文件"
+        save_task_to_disk(task_obj)
+
+        try:
+            fpath = save_uploaded_file(
+                upload_dir=UPLOAD_DIR,
+                task_id=task_obj.id,
+                upload_file=file,
+            )
+        except Exception as e:
+            logger.error("Folder upload – save failed for %s: %s", file.filename, e)
+            task_obj.status = "failed"
+            task_obj.error = str(e)
+            save_task_to_disk(task_obj)
+            errors.append(f"{file.filename}: {str(e)}")
+            continue
+
+        req = build_transcription_request(
+            request_cls=TranscriptionRequest,
+            model_size=model_size,
+            device=device,
+            compute_type=compute_type,
+            language=language,
+            task=task,
+            beam_size=beam_size,
+            vad_filter=vad_filter,
+            word_timestamps=word_timestamps,
+            output_format=output_format,
+            split_segments=split_segments,
+            segment_duration=segment_duration,
+            output_dir=output_dir,
+            speaker_diarization=speaker_diarization,
+            num_speakers=num_speakers,
+            llm_enhance=llm_enhance,
+            llm_api_key=llm_api_key,
+            llm_base_url=llm_base_url,
+            llm_model=llm_model,
+            llm_content_hint=llm_content_hint,
+        )
+
+        submit_transcription(
+            executor=_transcription_executor,
+            target=process_transcription,
+            task_id=task_obj.id,
+            file_path=str(fpath),
+            request=req,
+        )
+        task_ids.append(task_obj.id)
+
+    logger.info(
+        "Folder '%s' (%s) batch %s created with %d task(s)",
+        name, folder_id, batch_id, len(task_ids),
+    )
+    result: Dict[str, Any] = {
+        "folder_id": folder_id,
+        "batch_id": batch_id,
+        "task_ids": task_ids,
+    }
     if errors:
         result["errors"] = errors
     return result
@@ -671,16 +939,62 @@ async def editor_page(task_id: str):
 
 
 # ---------------------------------------------------------------------------
+# LLM model proxy (avoids browser CORS to issues)
+# ---------------------------------------------------------------------------
+def _rewrite_localhost_url(url: str) -> str:
+    """In Docker, rewrite localhost/127.0.0.1 to host.docker.internal."""
+    if not os.path.exists("/.dockerenv"):
+        return url
+    import re
+    return re.sub(
+        r"(https?://)(?:localhost|127\.0\.0\.1)(:\d+)",
+        r"\1host.docker.internal\2",
+        url,
+    )
+
+
+@app.post("/api/llm/models")
+async def proxy_llm_models(req: LlmModelsRequest):
+    """Proxy a GET /models request to the user-specified OpenAI-compatible endpoint."""
+    import httpx
+
+    base = _rewrite_localhost_url(req.base_url.rstrip("/"))
+    url = f"{base}/models"
+    headers = {"Authorization": f"Bearer {req.api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers=headers)
+        if resp.status_code != 200:
+            return JSONResponse(
+                status_code=resp.status_code,
+                content={"error": f"LLM API returned {resp.status_code}: {resp.text[:500]}"},
+            )
+        data = resp.json()
+        models = []
+        for m in data.get("data", []):
+            models.append({"id": m.get("id", ""), "name": m.get("id", "")})
+        models.sort(key=lambda x: x["id"])
+        return {"models": models}
+    except httpx.TimeoutException:
+        return JSONResponse(status_code=504, content={"error": "連線逾時，請檢查 Base URL 是否正確"})
+    except Exception as e:
+        return JSONResponse(status_code=502, content={"error": f"無法連線至 LLM API: {str(e)}"})
+
+
+# ---------------------------------------------------------------------------
 # Include routers & wire up shared state
 # ---------------------------------------------------------------------------
 app.include_router(subtitle_router)
 app.include_router(download_router)
 app.include_router(system_router)
 app.include_router(task_router)
+app.include_router(folder_router)
 
 set_task_store(TaskStore(tasks))
 set_download_task_registry(tasks)
 set_task_registry(tasks)
+set_folder_task_registry(tasks)
 
 # ---------------------------------------------------------------------------
 # Dev entry-point

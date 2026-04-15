@@ -46,6 +46,33 @@ def test_build_status_callback_updates_message_and_persists():
     assert saved == ["new message"]
 
 
+def test_build_status_callback_appends_segment_without_saving():
+    task = SimpleNamespace(message="old", partial_segments=None)
+    saved = []
+
+    callback = build_status_callback(
+        task=task, save_task=lambda t: saved.append("saved")
+    )
+    callback(segment={"start": 0.0, "end": 1.0, "text": "hello"})
+
+    assert task.partial_segments == [{"start": 0.0, "end": 1.0, "text": "hello"}]
+    assert saved == []
+
+
+def test_build_status_callback_segment_and_message_saves():
+    task = SimpleNamespace(message="old", partial_segments=None)
+    saved = []
+
+    callback = build_status_callback(
+        task=task, save_task=lambda t: saved.append("saved")
+    )
+    callback("new message", progress=50.0, segment={"start": 0.0, "end": 1.0, "text": "hi"})
+
+    assert task.message == "new message"
+    assert task.partial_segments == [{"start": 0.0, "end": 1.0, "text": "hi"}]
+    assert saved == ["saved"]
+
+
 def test_finalize_task_failure_updates_task_state_and_error():
     task = SimpleNamespace(status="processing", message="", error=None, end_time=None)
 
