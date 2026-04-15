@@ -12,6 +12,10 @@ interface EditorState {
 
   setSubtitles: (subs: Subtitle[]) => void
   updateSubtitle: (index: number, update: Partial<Subtitle>) => void
+  bulkUpdateTexts: (texts: string[]) => void
+  replaceSubtitles: (subs: Subtitle[]) => void
+  splitSubtitle: (index: number, splitTime: number) => void
+  mergeWithNext: (index: number) => void
   setSelectedIndex: (index: number) => void
   setSearchTerm: (term: string) => void
   undo: () => void
@@ -55,6 +59,82 @@ export const useEditorStore = create<EditorState>()((set, get) => ({
       history: newHistory,
       historyIndex: newHistory.length - 1,
     })
+  },
+
+  bulkUpdateTexts: (texts) => {
+    const { subtitles, history, historyIndex } = get()
+    const next = subtitles.map((s, i) => ({ ...s, text: texts[i] ?? s.text }))
+    const newHistory = history.slice(0, historyIndex + 1)
+    newHistory.push(JSON.parse(JSON.stringify(next)))
+    if (newHistory.length > MAX_HISTORY) newHistory.shift()
+    set({
+      subtitles: next,
+      isDirty: true,
+      history: newHistory,
+      historyIndex: newHistory.length - 1,
+    })
+  },
+
+  replaceSubtitles: (subs) => {
+    const { history, historyIndex } = get()
+    const next = JSON.parse(JSON.stringify(subs))
+    const newHistory = history.slice(0, historyIndex + 1)
+    newHistory.push(next)
+    if (newHistory.length > MAX_HISTORY) newHistory.shift()
+    set({
+      subtitles: next,
+      isDirty: true,
+      history: newHistory,
+      historyIndex: newHistory.length - 1,
+    })
+  },
+
+  splitSubtitle: (index, splitTime) => {
+    const { subtitles, history, historyIndex } = get()
+    const sub = subtitles[index]
+    if (!sub || splitTime <= sub.start_time || splitTime >= sub.end_time) return
+
+    const ratio = (splitTime - sub.start_time) / (sub.end_time - sub.start_time)
+    const splitChar = Math.round(sub.text.length * ratio)
+
+    const first: Subtitle = { ...sub, end_time: splitTime, text: sub.text.slice(0, splitChar).trim() || sub.text }
+    const second: Subtitle = { ...sub, index: sub.index + 1, start_time: splitTime, text: sub.text.slice(splitChar).trim() || '' }
+
+    const next = [
+      ...subtitles.slice(0, index),
+      first,
+      second,
+      ...subtitles.slice(index + 1).map(s => ({ ...s, index: s.index + 1 })),
+    ]
+
+    const newHistory = history.slice(0, historyIndex + 1)
+    newHistory.push(JSON.parse(JSON.stringify(next)))
+    if (newHistory.length > MAX_HISTORY) newHistory.shift()
+    set({ subtitles: next, isDirty: true, history: newHistory, historyIndex: newHistory.length - 1 })
+  },
+
+  mergeWithNext: (index) => {
+    const { subtitles, history, historyIndex } = get()
+    if (index < 0 || index >= subtitles.length - 1) return
+
+    const current = subtitles[index]
+    const nextSub = subtitles[index + 1]
+    const merged: Subtitle = {
+      ...current,
+      end_time: nextSub.end_time,
+      text: `${current.text} ${nextSub.text}`.trim(),
+    }
+
+    const next = [
+      ...subtitles.slice(0, index),
+      merged,
+      ...subtitles.slice(index + 2).map(s => ({ ...s, index: s.index - 1 })),
+    ]
+
+    const newHistory = history.slice(0, historyIndex + 1)
+    newHistory.push(JSON.parse(JSON.stringify(next)))
+    if (newHistory.length > MAX_HISTORY) newHistory.shift()
+    set({ subtitles: next, isDirty: true, history: newHistory, historyIndex: newHistory.length - 1 })
   },
 
   setSelectedIndex: (index) => set({ selectedIndex: index }),

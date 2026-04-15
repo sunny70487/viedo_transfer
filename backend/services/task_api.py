@@ -23,6 +23,17 @@ def get_task_registry() -> Dict[str, Any]:
     return _task_registry
 
 
+@router.delete("/tasks/failed")
+async def delete_all_failed_tasks():
+    """Delete all tasks with status 'failed'."""
+    tasks = get_task_registry()
+    failed_ids = [tid for tid, t in tasks.items() if t.status == "failed"]
+    for tid in failed_ids:
+        del tasks[tid]
+        TaskPersistence.delete_task(tid)
+    return {"message": f"已刪除 {len(failed_ids)} 個失敗任務", "deleted_count": len(failed_ids)}
+
+
 @router.get("/tasks/{task_id}")
 async def get_task_status(task_id: str):
     tasks = get_task_registry()

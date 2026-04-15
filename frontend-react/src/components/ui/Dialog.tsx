@@ -50,7 +50,7 @@ export function Dialog({ open, onClose, title, children, className }: DialogProp
             </Button>
           </div>
         )}
-        <div className="px-6 py-4">{children}</div>
+        <div className="px-6 py-4 overflow-y-auto max-h-[calc(90vh-4rem)]">{children}</div>
       </div>
     </div>
   )

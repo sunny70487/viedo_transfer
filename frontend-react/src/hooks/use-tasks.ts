@@ -33,6 +33,21 @@ export function useDeleteTask() {
   })
 }
 
+export function useDeleteAllFailedTasks() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: api.deleteAllFailedTasks,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['folders'] })
+      toast('success', data.message)
+    },
+    onError: (err: Error) => {
+      toast('error', `刪除失敗: ${err.message}`)
+    },
+  })
+}
+
 export function useTranscribeUrl() {
   const qc = useQueryClient()
   return useMutation({

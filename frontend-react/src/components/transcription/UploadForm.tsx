@@ -1,14 +1,23 @@
 import { useState, useRef, useCallback } from 'react'
-import { Upload, FileAudio, X, Send } from 'lucide-react'
+import { Upload, FileAudio, FolderInput, X, Send } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { TranscriptionOptions } from './TranscriptionOptions'
+import { FolderPreview } from './FolderPreview'
+import { FolderSelect } from './FolderSelect'
 import { useTranscribeUpload, useTranscribeBatchUpload } from '@/hooks/use-tasks'
 import { formatFileSize } from '@/lib/utils'
 
+type Mode = 'idle' | 'files' | 'folder-preview'
+
 export function UploadForm() {
+  const [mode, setMode] = useState<Mode>('idle')
   const [files, setFiles] = useState<File[]>([])
+  const [folderFiles, setFolderFiles] = useState<File[]>([])
+  const [folderName, setFolderName] = useState('')
   const [dragOver, setDragOver] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const [selectedFolderId, setSelectedFolderId] = useState('')
   const [options, setOptions] = useState<Record<string, string>>({
     model_size: 'qwen3-asr-1.7b',
     vad_filter: 'true',
@@ -29,10 +38,15 @@ export function UploadForm() {
       const unique = arr.filter((f) => !existing.has(`${f.name}-${f.size}-${f.lastModified}`))
       return [...prev, ...unique]
     })
+    setMode('files')
   }, [])
 
   const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index))
+    setFiles((prev) => {
+      const next = prev.filter((_, i) => i !== index)
+      if (next.length === 0) setMode('idle')
+      return next
+    })
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -41,25 +55,76 @@ export function UploadForm() {
     if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files)
   }, [addFiles])
 
+  const handleFolderSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const input = e.target
+    if (!input.files || input.files.length === 0) return
+
+    const allFiles = Array.from(input.files)
+    const first = allFiles[0] as File & { webkitRelativePath?: string }
+    const rootName = first.webkitRelativePath?.split('/')[0] || '資料夾'
+
+    setFolderFiles(allFiles)
+    setFolderName(rootName)
+    setMode('folder-preview')
+    input.value = ''
+  }, [])
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (files.length === 0) return
+    const params = selectedFolderId
+      ? { ...options, folder_id: selectedFolderId }
+      : options
     if (isBatch) {
-      batchMutation.mutate({ files, params: options }, {
-        onSuccess: () => setFiles([]),
+      batchMutation.mutate({ files, params }, {
+        onSuccess: () => { setFiles([]); setMode('idle') },
       })
     } else {
-      singleMutation.mutate({ file: files[0], params: options }, {
-        onSuccess: () => setFiles([]),
+      singleMutation.mutate({ file: files[0], params }, {
+        onSuccess: () => { setFiles([]); setMode('idle') },
       })
     }
   }
 
   const totalSize = files.reduce((sum, f) => sum + f.size, 0)
 
+  if (mode === 'folder-preview') {
+    return (
+      <FolderPreview
+        files={folderFiles}
+        rootFolderName={folderName}
+        onCancel={() => { setFolderFiles([]); setMode('idle') }}
+        onSubmitted={() => { setFolderFiles([]); setMode('idle') }}
+      />
+    )
+  }
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {/* Hidden inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.mp4,.avi,.mkv,.webm,.mov"
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) addFiles(e.target.files)
+          e.target.value = ''
+        }}
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFolderSelect}
+        {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+      />
+
+      {/* Drop zone / file list */}
       <div
+        role="button"
+        tabIndex={0}
         className={`relative border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
           dragOver
             ? 'border-primary bg-primary/5'
@@ -68,19 +133,9 @@ export function UploadForm() {
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click() }}
       >
-        <input
-          ref={inputRef}
-          type="file"
-          multiple
-          accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.mp4,.avi,.mkv,.webm,.mov"
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files) addFiles(e.target.files)
-            e.target.value = ''
-          }}
-        />
         {files.length > 0 ? (
           <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-2">
@@ -91,7 +146,7 @@ export function UploadForm() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                onClick={() => setFiles([])}
+                onClick={() => { setFiles([]); setMode('idle') }}
                 className="text-xs"
               >
                 清除全部
@@ -116,7 +171,7 @@ export function UploadForm() {
             <button
               type="button"
               className="text-xs text-primary hover:underline cursor-pointer mt-1"
-              onClick={() => inputRef.current?.click()}
+              onClick={() => fileInputRef.current?.click()}
             >
               + 新增更多檔案
             </button>
@@ -129,6 +184,18 @@ export function UploadForm() {
           </>
         )}
       </div>
+
+      {/* Folder import button */}
+      <button
+        type="button"
+        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg border border-dashed border-border dark:border-border-dark text-sm text-muted dark:text-muted-dark hover:border-primary hover:text-primary transition-colors cursor-pointer"
+        onClick={() => folderInputRef.current?.click()}
+      >
+        <FolderInput className="h-4 w-4" />
+        匯入資料夾（遞迴掃描媒體檔案）
+      </button>
+
+      <FolderSelect value={selectedFolderId} onChange={setSelectedFolderId} />
       <TranscriptionOptions values={options} onChange={(k, v) => setOptions((p) => ({ ...p, [k]: v }))} />
       <Button type="submit" className="w-full" disabled={files.length === 0} loading={isPending}>
         <Send className="h-4 w-4" />

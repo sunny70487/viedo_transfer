@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { Scissors, Merge } from 'lucide-react'
 import { useEditorStore } from '@/stores/editor-store'
 import { formatTimestamp, cn } from '@/lib/utils'
 import type { Subtitle } from '@/types/api'
@@ -9,13 +10,28 @@ interface SubtitleRowProps {
   isActive: boolean
   onSelect: () => void
   onSeek: (time: number) => void
+  currentTime?: number
 }
 
-export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek }: SubtitleRowProps) {
+export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek, currentTime }: Readonly<SubtitleRowProps>) {
   const updateSubtitle = useEditorStore((s) => s.updateSubtitle)
+  const splitSubtitle = useEditorStore((s) => s.splitSubtitle)
+  const mergeWithNext = useEditorStore((s) => s.mergeWithNext)
+  const subtitlesCount = useEditorStore((s) => s.subtitles.length)
   const [editing, setEditing] = useState(false)
   const [editText, setEditText] = useState(subtitle.text)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const prevIdxRef = useRef(subtitle.index)
+
+  if (prevIdxRef.current !== subtitle.index) {
+    prevIdxRef.current = subtitle.index
+    if (editing) setEditing(false)
+    setEditText(subtitle.text)
+  }
+
+  useEffect(() => {
+    if (!editing) setEditText(subtitle.text)
+  }, [subtitle.text, editing])
 
   useEffect(() => {
     if (editing && inputRef.current) {
@@ -37,6 +53,26 @@ export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek }: Sub
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); commit() }
     if (e.key === 'Escape') { setEditText(subtitle.text); setEditing(false) }
+  }
+
+  const canSplit = isActive && currentTime != null
+    && currentTime > subtitle.start_time
+    && currentTime < subtitle.end_time
+
+  const canMerge = index < subtitlesCount - 1
+
+  const handleSplit = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (canSplit && currentTime != null) {
+      splitSubtitle(index, currentTime)
+    }
+  }
+
+  const handleMerge = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (canMerge) {
+      mergeWithNext(index)
+    }
   }
 
   return (
@@ -85,9 +121,41 @@ export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek }: Sub
         )}
       </div>
 
-      <span className="shrink-0 text-xs font-mono text-muted/60 dark:text-muted-dark/60 tabular-nums self-center">
-        #{subtitle.index + 1}
-      </span>
+      <div className="shrink-0 flex items-center gap-1">
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            type="button"
+            onClick={handleSplit}
+            disabled={!canSplit}
+            className={cn(
+              'p-1 rounded transition-colors',
+              canSplit
+                ? 'text-amber-500 hover:bg-amber-500/10 hover:text-amber-400'
+                : 'text-muted/30 dark:text-muted-dark/30 cursor-not-allowed'
+            )}
+            title="在當前播放時間分割 (Ctrl+D)"
+          >
+            <Scissors className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={handleMerge}
+            disabled={!canMerge}
+            className={cn(
+              'p-1 rounded transition-colors',
+              canMerge
+                ? 'text-blue-500 hover:bg-blue-500/10 hover:text-blue-400'
+                : 'text-muted/30 dark:text-muted-dark/30 cursor-not-allowed'
+            )}
+            title="與下一句合併 (Ctrl+M)"
+          >
+            <Merge className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <span className="text-xs font-mono text-muted/60 dark:text-muted-dark/60 tabular-nums ml-1">
+          #{subtitle.index + 1}
+        </span>
+      </div>
     </div>
   )
 }

@@ -16,6 +16,8 @@ from sqlalchemy import (
     Text,
     JSON,
     event,
+    inspect,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
@@ -54,6 +56,17 @@ class Base(DeclarativeBase):
 SessionLocal = sessionmaker(bind=engine)
 
 
+class FolderRecord(Base):
+    __tablename__ = "folders"
+
+    id = Column(String(36), primary_key=True)
+    name = Column(String(255), nullable=False)
+    parent_id = Column(String(36), nullable=True, index=True)
+    sort_order = Column(Float, nullable=False, default=0.0)
+    created_at = Column(Float, nullable=False)
+    updated_at = Column(Float, nullable=False)
+
+
 class TaskRecord(Base):
     __tablename__ = "tasks"
 
@@ -67,6 +80,8 @@ class TaskRecord(Base):
     end_time = Column(Float, nullable=True)
     source_name = Column(Text, nullable=True)
     batch_id = Column(String(36), nullable=True, index=True)
+    folder_id = Column(String(36), nullable=True, index=True)
+    sort_order = Column(Float, nullable=False, default=0.0)
 
     def to_dict(self):
         return {
@@ -80,11 +95,52 @@ class TaskRecord(Base):
             "end_time": self.end_time,
             "source_name": self.source_name,
             "batch_id": self.batch_id,
+            "folder_id": self.folder_id,
+            "sort_order": self.sort_order,
         }
 
 
+def _run_migrations():
+    """Add missing columns / tables introduced after initial release."""
+    insp = inspect(engine)
+
+    if insp.has_table("tasks"):
+        existing = {col["name"] for col in insp.get_columns("tasks")}
+        if "folder_id" not in existing:
+            is_pg = DATABASE_URL.startswith("postgresql")
+            col_type = "VARCHAR(36)" if is_pg else "VARCHAR(36)"
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE tasks ADD COLUMN folder_id {col_type}"))
+            logger.info("Migration: added folder_id column to tasks table")
+
+            if is_pg:
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        "CREATE INDEX IF NOT EXISTS ix_tasks_folder_id ON tasks (folder_id)"
+                    ))
+
+    if insp.has_table("folders"):
+        folder_cols = {col["name"] for col in insp.get_columns("folders")}
+        if "sort_order" not in folder_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE folders ADD COLUMN sort_order FLOAT DEFAULT 0.0"))
+            logger.info("Migration: added sort_order column to folders table")
+        if "parent_id" not in folder_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE folders ADD COLUMN parent_id VARCHAR(36)"))
+            logger.info("Migration: added parent_id column to folders table")
+
+    if insp.has_table("tasks"):
+        task_cols = {col["name"] for col in insp.get_columns("tasks")}
+        if "sort_order" not in task_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE tasks ADD COLUMN sort_order FLOAT DEFAULT 0.0"))
+            logger.info("Migration: added sort_order column to tasks table")
+
+
 def init_db():
-    """Create tables if they don't exist."""
+    """Create tables if they don't exist, then run incremental migrations."""
     Base.metadata.create_all(bind=engine)
+    _run_migrations()
     db_label = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else DATABASE_URL
     logger.info(f"Database initialized: {db_label.split('?')[0]}")

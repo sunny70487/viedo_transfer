@@ -1,15 +1,47 @@
 import { Select } from '@/components/ui/Select'
 import { Input } from '@/components/ui/Input'
 import { MODEL_OPTIONS, LANGUAGE_OPTIONS } from '@/lib/constants'
-import { ChevronDown } from 'lucide-react'
-import { useState } from 'react'
+import { ChevronDown, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { api } from '@/api/client'
+import type { LlmModel } from '@/types/api'
+
+const LLM_STORAGE_KEY = 'whisper_llm_settings'
+
+interface LlmSettings {
+  llm_enhance: string
+  llm_api_key: string
+  llm_base_url: string
+  llm_model: string
+  llm_content_hint: string
+}
+
+function loadLlmSettings(): LlmSettings {
+  try {
+    const raw = localStorage.getItem(LLM_STORAGE_KEY)
+    if (raw) return JSON.parse(raw) as LlmSettings
+  } catch { /* ignore */ }
+  return {
+    llm_enhance: 'false',
+    llm_api_key: '',
+    llm_base_url: 'https://api.openai.com/v1',
+    llm_model: 'gpt-4o-mini',
+    llm_content_hint: '',
+  }
+}
+
+function saveLlmSettings(s: LlmSettings) {
+  try {
+    localStorage.setItem(LLM_STORAGE_KEY, JSON.stringify(s))
+  } catch { /* ignore */ }
+}
 
 interface TranscriptionOptionsProps {
   values: Record<string, string>
   onChange: (key: string, value: string) => void
 }
 
-function Section({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+function Section({ title, children, defaultOpen = false }: Readonly<{ title: string; children: React.ReactNode; defaultOpen?: boolean }>) {
   const [open, setOpen] = useState(defaultOpen)
   return (
     <div className="border border-border dark:border-border-dark rounded-lg overflow-hidden">
@@ -26,7 +58,65 @@ function Section({ title, children, defaultOpen = false }: { title: string; chil
   )
 }
 
-export function TranscriptionOptions({ values, onChange }: TranscriptionOptionsProps) {
+type ModelStatus = 'idle' | 'loading' | 'success' | 'error'
+
+export function TranscriptionOptions({ values, onChange }: Readonly<TranscriptionOptionsProps>) {
+  const [llm, setLlm] = useState<LlmSettings>(() => {
+    const saved = loadLlmSettings()
+    for (const [k, v] of Object.entries(saved)) {
+      if (values[k] === undefined) onChange(k, v)
+    }
+    return saved
+  })
+
+  const [models, setModels] = useState<LlmModel[]>([])
+  const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
+  const [modelError, setModelError] = useState('')
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const updateLlm = useCallback((key: keyof LlmSettings, value: string) => {
+    setLlm((prev) => {
+      const next = { ...prev, [key]: value }
+      saveLlmSettings(next)
+      return next
+    })
+    onChange(key, value)
+  }, [onChange])
+
+  const fetchModels = useCallback(async (key: string, url: string) => {
+    if (!key || !url) {
+      setModels([])
+      setModelStatus('idle')
+      return
+    }
+    setModelStatus('loading')
+    setModelError('')
+    try {
+      const data = await api.fetchLlmModels(key, url)
+      setModels(data.models)
+      setModelStatus('success')
+    } catch (e) {
+      setModelError((e as Error).message)
+      setModelStatus('error')
+      setModels([])
+    }
+  }, [])
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    if (!llm.llm_api_key || !llm.llm_base_url) {
+      setModels([])
+      setModelStatus('idle')
+      return
+    }
+    debounceRef.current = setTimeout(() => {
+      fetchModels(llm.llm_api_key, llm.llm_base_url)
+    }, 800)
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+  }, [llm.llm_api_key, llm.llm_base_url, fetchModels])
+
+  const llmEnabled = llm.llm_enhance === 'true'
+
   return (
     <div className="space-y-3 mt-4">
       <Section title="模型設定" defaultOpen>
@@ -42,6 +132,90 @@ export function TranscriptionOptions({ values, onChange }: TranscriptionOptionsP
           value={values.language || ''}
           onChange={(e) => onChange('language', e.target.value)}
         />
+      </Section>
+
+      <Section title="AI 字幕增強">
+        <div className="flex items-center gap-2 mt-3">
+          <input
+            type="checkbox"
+            id="llm-enhance"
+            className="rounded cursor-pointer"
+            checked={llmEnabled}
+            onChange={(e) => updateLlm('llm_enhance', String(e.target.checked))}
+          />
+          <label htmlFor="llm-enhance" className="text-sm text-text dark:text-text-dark cursor-pointer">
+            啟用 LLM 字幕校正
+          </label>
+        </div>
+        {llmEnabled && (
+          <p className="text-xs text-muted dark:text-muted-dark -mt-1">
+            轉錄完成後使用大型語言模型修正音譯錯誤、還原英文術語、改善標點
+          </p>
+        )}
+        {llmEnabled && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-sm font-medium text-text dark:text-text-dark">Base URL</label>
+              <Input
+                type="text"
+                placeholder="https://api.openai.com/v1"
+                value={llm.llm_base_url}
+                onChange={(e) => updateLlm('llm_base_url', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text dark:text-text-dark">API Key</label>
+              <Input
+                type="password"
+                placeholder="sk-..."
+                autoComplete="off"
+                value={llm.llm_api_key}
+                onChange={(e) => updateLlm('llm_api_key', e.target.value)}
+              />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <label className="block text-sm font-medium text-text dark:text-text-dark">模型</label>
+                {modelStatus === 'loading' && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted" />}
+                {modelStatus === 'success' && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                {modelStatus === 'error' && (
+                  <span className="flex items-center gap-1 text-xs text-danger">
+                    <XCircle className="h-3.5 w-3.5" />
+                    {modelError || '連線失敗'}
+                  </span>
+                )}
+              </div>
+              {models.length > 0 ? (
+                <select
+                  className="h-10 w-full rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-3 text-sm text-text dark:text-text-dark focus:outline-none focus:ring-2 focus:ring-primary/50 cursor-pointer"
+                  value={llm.llm_model}
+                  onChange={(e) => updateLlm('llm_model', e.target.value)}
+                >
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  type="text"
+                  placeholder="gpt-4o-mini"
+                  value={llm.llm_model}
+                  onChange={(e) => updateLlm('llm_model', e.target.value)}
+                />
+              )}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text dark:text-text-dark">內容描述 (選填)</label>
+              <textarea
+                className="w-full rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-3 py-2 text-sm text-text dark:text-text-dark placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y min-h-[40px]"
+                rows={2}
+                placeholder="例如：資訊安全課程，涉及 IDA、PE、Assembly 等專業術語"
+                value={llm.llm_content_hint}
+                onChange={(e) => updateLlm('llm_content_hint', e.target.value)}
+              />
+            </div>
+          </div>
+        )}
       </Section>
 
       <Section title="進階選項">

@@ -37,7 +37,11 @@ from backend.shared.transcription_pipeline import (
 from backend.shared.text_processing import (
     convert_to_traditional as _convert_to_traditional,
     strip_punctuation as _strip_punctuation,
+    smart_strip_punctuation as _smart_strip_punctuation,
     split_long_segments as _split_long_segments,
+    space_english_tokens as _space_english_tokens,
+    rebuild_segment_text_from_timestamps as _rebuild_from_ts,
+    _join_words_text,
     OPENCC_AVAILABLE,
 )
 
@@ -252,18 +256,17 @@ def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
                 if not sent_text:
                     continue
 
-                # Timestamps in milliseconds → convert to seconds
                 seg_start = float(sent.get("start", 0)) / 1000.0 + time_offset
                 seg_end = float(sent.get("end", 0)) / 1000.0 + time_offset
 
                 segment_index = len(segments_json)
-                transcript_parts.append(sent_text)
 
                 # Character-level timestamps from sentence_info
                 words_payload = []
                 char_timestamps = sent.get("timestamp", [])
                 if char_timestamps:
                     chars = list(sent_text.replace(" ", ""))
+                    display_text = _rebuild_from_ts(chars, char_timestamps)
                     for idx, ts_pair in enumerate(char_timestamps):
                         if idx < len(chars):
                             w_start = float(ts_pair[0]) / 1000.0 + time_offset
@@ -276,13 +279,16 @@ def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
                             }
                             words_payload.append(word_payload)
                             words_data.append(word_payload)
+                else:
+                    display_text = sent_text
 
+                transcript_parts.append(display_text)
                 segments_json.append(
                     {
                         "id": segment_index,
                         "start": seg_start,
                         "end": seg_end,
-                        "text": sent_text,
+                        "text": display_text,
                         "confidence": None,
                         "words": words_payload,
                     }
@@ -293,9 +299,6 @@ def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
             if not text:
                 continue
 
-            transcript_parts.append(text)
-
-            # Get character-level timestamps
             char_timestamps = result_item.get("timestamp", [])
             seg_start = 0.0 + time_offset
             seg_end = 0.0 + time_offset
@@ -308,6 +311,7 @@ def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
             words_payload = []
             if char_timestamps:
                 chars = list(text.replace(" ", ""))
+                display_text = _rebuild_from_ts(chars, char_timestamps)
                 for idx, ts_pair in enumerate(char_timestamps):
                     if idx < len(chars):
                         w_start = float(ts_pair[0]) / 1000.0 + time_offset
@@ -320,17 +324,24 @@ def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
                         }
                         words_payload.append(word_payload)
                         words_data.append(word_payload)
+            else:
+                display_text = text
 
+            transcript_parts.append(display_text)
             segments_json.append(
                 {
                     "id": segment_index,
                     "start": seg_start,
                     "end": seg_end,
-                    "text": text,
+                    "text": display_text,
                     "confidence": None,
                     "words": words_payload,
                 }
             )
+
+    # ---- Post-processing: add spaces between English tokens ----
+    for seg in segments_json:
+        seg["text"] = _space_english_tokens(seg["text"])
 
     # ---- Post-processing: split overly long segments ----
     segments_json, words_data = _split_long_segments(
@@ -345,15 +356,14 @@ def _parse_funasr_result(res, model_name: str, time_offset: float = 0.0):
     for w in words_data:
         w["word"] = _convert_to_traditional(w["word"])
 
-    # ---- Post-processing: 移除標點符號 ----
     for seg in segments_json:
-        seg["text"] = _strip_punctuation(seg["text"])
+        seg["text"] = _smart_strip_punctuation(seg["text"])
     transcript_parts = [seg["text"] for seg in segments_json if seg["text"]]
 
     full_text = (
         "\n".join(transcript_parts)
         if transcript_parts
-        else _strip_punctuation(_convert_to_traditional(raw_text.strip()))
+        else _smart_strip_punctuation(_convert_to_traditional(raw_text.strip()))
     )
     return segments_json, words_data, full_text, detected_language
 

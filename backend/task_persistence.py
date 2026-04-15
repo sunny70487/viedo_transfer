@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
-from backend.database import SessionLocal, TaskRecord, init_db
+from backend.database import SessionLocal, TaskRecord, FolderRecord, init_db
 
 logger = logging.getLogger("task_persistence")
 
@@ -43,6 +43,8 @@ class TaskPersistence:
                 record.end_time = task_data.get("end_time")
                 record.source_name = task_data.get("source_name")
                 record.batch_id = task_data.get("batch_id")
+                record.folder_id = task_data.get("folder_id")
+                record.sort_order = task_data.get("sort_order", 0.0)
                 session.commit()
             logger.debug(f"任務 {task_id} 已保存到資料庫")
             return True
@@ -135,7 +137,12 @@ class TaskPersistence:
                     matching = list(task_dir.glob(f"*.{ext}"))
                     if matching:
                         updated = [fp for fp in matching if "updated" in fp.name]
-                        output_files[ext] = str(updated[0] if updated else matching[0])
+                        if updated:
+                            output_files[ext] = str(updated[0])
+                            if ext == "json":
+                                output_files["updated_json"] = str(updated[0])
+                        else:
+                            output_files[ext] = str(matching[0])
 
                 creation_time = task_dir.stat().st_ctime
                 modification_time = json_file.stat().st_mtime

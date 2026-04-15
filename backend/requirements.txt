@@ -12,6 +12,10 @@ python-dotenv>=1.0.0
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 
+# LLM 字幕增強
+openai>=1.0.0
+httpx>=0.27.0
+
 # 系統相關依賴
 pywin32>=305; platform_system=="Windows"
 

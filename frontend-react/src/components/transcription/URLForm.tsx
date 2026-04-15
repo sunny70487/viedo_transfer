@@ -3,6 +3,7 @@ import { Link2, Send } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Select } from '@/components/ui/Select'
 import { TranscriptionOptions } from './TranscriptionOptions'
+import { FolderSelect } from './FolderSelect'
 import { useTranscribeUrl, useTranscribeBatchUrls } from '@/hooks/use-tasks'
 
 const FORMAT_OPTIONS = [
@@ -20,7 +21,8 @@ function parseUrls(text: string): string[] {
 
 export function URLForm() {
   const [urlText, setUrlText] = useState('')
-  const [downloadFormat, setDownloadFormat] = useState('audio')
+  const [downloadFormat, setDownloadFormat] = useState('both')
+  const [selectedFolderId, setSelectedFolderId] = useState('')
   const [options, setOptions] = useState<Record<string, string>>({
     model_size: 'qwen3-asr-1.7b',
     vad_filter: 'true',
@@ -39,9 +41,10 @@ export function URLForm() {
     e.preventDefault()
     if (urls.length === 0) return
 
-    const shared = Object.fromEntries(
+    const shared: Record<string, unknown> = Object.fromEntries(
       Object.entries(options).filter(([, v]) => v !== ''),
     )
+    if (selectedFolderId) shared.folder_id = selectedFolderId
 
     if (isBatch) {
       batchMutation.mutate({
@@ -90,6 +93,7 @@ export function URLForm() {
         <label className="block text-sm font-medium text-text dark:text-text-dark mb-1.5">下載格式</label>
         <Select options={FORMAT_OPTIONS} value={downloadFormat} onChange={(e) => setDownloadFormat(e.target.value)} />
       </div>
+      <FolderSelect value={selectedFolderId} onChange={setSelectedFolderId} />
       <TranscriptionOptions values={options} onChange={handleOptionChange} />
       <Button type="submit" className="w-full" loading={isPending} disabled={urls.length === 0}>
         <Send className="h-4 w-4" />
