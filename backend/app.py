@@ -44,6 +44,7 @@ from backend.models import (
     SubtitleExportRequest,
 )
 from backend.shared.engine_routing import transcribe_audio
+from backend.shared.video_utils import prepare_source_video_for_preview
 from backend.task_persistence import TaskPersistence
 from backend.shared.media_config import SUPPORTED_MEDIA_EXTENSIONS
 from backend.services.download_api import (
@@ -384,13 +385,20 @@ def process_transcription(
         else:
             task.progress = 30.0
 
-        # Store source path so the video can be served during transcription
+        status_callback = build_status_callback(task=task, save_task=save_task_to_disk)
+
+        # Convert source video to browser-playable mp4 before transcription
+        # so the user can watch the video while subtitles stream in.
         if file_path and os.path.isfile(file_path):
-            task.source_file_path = file_path
+            preview_path = prepare_source_video_for_preview(
+                source_path=file_path,
+                output_dir=output_directory,
+                task_id=task_id,
+                status_callback=status_callback,
+            )
+            task.source_file_path = preview_path or file_path
 
         task.message = "正在執行轉錄..."
-
-        status_callback = build_status_callback(task=task, save_task=save_task_to_disk)
 
         transcription_results = transcribe_audio(
             audio_path=file_path,

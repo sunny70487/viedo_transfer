@@ -1,7 +1,15 @@
+import logging
 from pathlib import Path
 import subprocess
 
 from backend.shared.media_config import VIDEO_EXTENSIONS
+
+logger = logging.getLogger(__name__)
+
+# Formats the browser can play natively without conversion
+_BROWSER_NATIVE_CONTAINERS = {".mp4", ".webm"}
+_FFMPEG_TIMEOUT_REMUX = 300   # seconds
+_FFMPEG_TIMEOUT_TRANSCODE = 900
 
 
 def is_video_file(path: str | Path) -> bool:
@@ -92,3 +100,105 @@ def maybe_prepare_video_output(
     output_files["video"] = str(audio_path)
     if expose_mp4_key:
         output_files[file_ext.lstrip(".")] = str(audio_path)
+
+
+def prepare_source_video_for_preview(
+    source_path: "str | Path",
+    output_dir: "str | Path",
+    task_id: str,
+    *,
+    status_callback=None,
+    verbose: bool = False,
+) -> "str | None":
+    """
+    Ensure a browser-playable mp4 exists before transcription starts.
+
+    Strategy (in order):
+      1. Not a video file → return None (audio-only, no preview needed)
+      2. Already .mp4 or .webm → return source path as-is (browser-native)
+      3. Remux with ``-c copy`` (near-instant, codec-preserving)
+      4. Full transcode to H.264/AAC as last resort
+      5. Both fail → return None (VideoPlayer shows fallback)
+
+    The returned path (when not None) is safe to serve directly to a
+    browser and is stored as ``task.source_file_path``.
+    """
+    source_path = Path(source_path)
+
+    if not is_video_file(source_path):
+        return None
+
+    ext = source_path.suffix.lower()
+
+    if ext in _BROWSER_NATIVE_CONTAINERS:
+        return str(source_path)
+
+    preview_path = Path(output_dir) / f"{task_id}_preview.mp4"
+
+    if status_callback:
+        status_callback("正在準備影片預覽...", progress=8.0)
+    if verbose:
+        print(f"Preparing mp4 preview from {source_path.name}")
+
+    # ── Attempt 1: remux (copy all streams, change container only) ──
+    remux_cmd = [
+        "ffmpeg", "-i", str(source_path),
+        "-c", "copy",
+        "-movflags", "+faststart",
+        "-y", str(preview_path),
+    ]
+    try:
+        result = subprocess.run(
+            remux_cmd,
+            capture_output=True,
+            timeout=_FFMPEG_TIMEOUT_REMUX,
+        )
+        if (
+            result.returncode == 0
+            and preview_path.exists()
+            and preview_path.stat().st_size > 0
+        ):
+            if verbose:
+                size_mb = preview_path.stat().st_size / (1024 * 1024)
+                print(f"  ✓ Remux succeeded: {size_mb:.1f} MB")
+            return str(preview_path)
+        if verbose:
+            stderr = result.stderr.decode("utf-8", errors="replace")[:300]
+            print(f"  Remux failed (rc={result.returncode}): {stderr}")
+    except subprocess.TimeoutExpired:
+        logger.warning("Video remux timed out for %s", source_path.name)
+    except Exception as exc:
+        logger.warning("Video remux error: %s", exc)
+
+    # ── Attempt 2: full transcode (H.264 + AAC) ──
+    if status_callback:
+        status_callback("正在轉碼影片為 MP4...", progress=10.0)
+
+    try:
+        result = subprocess.run(
+            build_mp4_conversion_command(source_path, preview_path),
+            capture_output=True,
+            timeout=_FFMPEG_TIMEOUT_TRANSCODE,
+        )
+        if (
+            result.returncode == 0
+            and preview_path.exists()
+            and preview_path.stat().st_size > 0
+        ):
+            if verbose:
+                size_mb = preview_path.stat().st_size / (1024 * 1024)
+                print(f"  ✓ Transcode succeeded: {size_mb:.1f} MB")
+            return str(preview_path)
+        if verbose:
+            stderr = result.stderr.decode("utf-8", errors="replace")[:300]
+            print(f"  Transcode failed (rc={result.returncode}): {stderr}")
+    except subprocess.TimeoutExpired:
+        logger.warning("Video transcode timed out for %s", source_path.name)
+    except Exception as exc:
+        logger.warning("Video transcode error: %s", exc)
+
+    logger.warning(
+        "Could not prepare mp4 preview for %s — VideoPlayer will show fallback",
+        source_path.name,
+    )
+    return None
