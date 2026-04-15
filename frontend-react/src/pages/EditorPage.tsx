@@ -242,7 +242,15 @@ export function EditorPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="space-y-4">
-          <VideoPlayer ref={videoRef} src={videoSrc} subtitles={subtitles} onTimeUpdate={setVideoTime} />
+          {isStreaming ? (
+            <div className="aspect-video rounded-lg bg-bg dark:bg-bg-dark border border-border dark:border-border-dark flex flex-col items-center justify-center gap-3 text-muted dark:text-muted-dark">
+              <Loader2 className="h-8 w-8 animate-spin text-primary/60" aria-hidden="true" />
+              <p className="text-sm">轉錄完成後影片將顯示於此</p>
+              <p className="text-xs">{liveTask?.message || ''}</p>
+            </div>
+          ) : (
+            <VideoPlayer ref={videoRef} src={videoSrc} subtitles={subtitles} onTimeUpdate={setVideoTime} />
+          )}
           <Card className="p-4">
             <div className="grid grid-cols-3 gap-4 text-center text-sm">
               <div>
