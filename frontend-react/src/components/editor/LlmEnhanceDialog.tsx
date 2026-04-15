@@ -91,7 +91,7 @@ export function LlmEnhanceDialog({
         model: s.model,
         content_hint: contentHint || undefined,
         merge_short: mode === 'enhance',
-        mode,
+        mode: mode as 'enhance' | 'translate',
         target_language: mode === 'translate' ? targetLang : undefined,
         bilingual: mode === 'translate' ? bilingual : undefined,
       })
