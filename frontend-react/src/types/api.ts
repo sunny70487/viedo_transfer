@@ -46,6 +46,13 @@ export interface TaskResult {
   output_dir?: string
 }
 
+export interface PartialSegment {
+  start: number
+  end: number
+  text: string
+  speaker?: string
+}
+
 export interface Task {
   id: string
   status: string
@@ -57,6 +64,38 @@ export interface Task {
   end_time?: number
   source_name?: string
   batch_id?: string
+  folder_id?: string
+  sort_order?: number
+  partial_segments?: PartialSegment[]
+}
+
+export interface SubtitleNotes {
+  summary: string
+  chapters: Array<{ time: number; title: string }>
+}
+
+export interface LlmSummarizeRequest {
+  api_key: string
+  base_url: string
+  model: string
+  content_hint?: string
+}
+
+export interface Folder {
+  id: string
+  name: string
+  parent_id: string | null
+  sort_order: number
+  task_count: number
+  created_at: number
+  updated_at: number
+}
+
+export interface FolderUploadResponse {
+  folder_id: string
+  batch_id: string
+  task_ids: string[]
+  errors?: string[]
 }
 
 export interface BatchResponse {
@@ -108,6 +147,16 @@ export interface TranscriptionRequest {
   output_dir?: string
   speaker_diarization?: boolean
   num_speakers?: number
+  llm_enhance?: boolean
+  llm_api_key?: string
+  llm_base_url?: string
+  llm_model?: string
+  llm_content_hint?: string
+}
+
+export interface LlmModel {
+  id: string
+  name: string
 }
 
 export interface RetranscribeRequest {
