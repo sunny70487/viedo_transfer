@@ -10,9 +10,10 @@ import os
 import json
 import time
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Path as FastAPIPath
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 
 from backend.models import (
     SubtitleCollection,
@@ -379,6 +380,11 @@ async def update_subtitles(
     """更新字幕內容"""
     tasks = get_tasks_storage()
     result = SubtitleService.save_subtitle_data(task_id, subtitle_collection, tasks)
+
+    from backend.task_persistence import TaskPersistence
+    task = tasks[task_id]
+    TaskPersistence.save_task(task_id, task.dict() if hasattr(task, 'dict') else task)
+
     return result
 
 
@@ -420,6 +426,10 @@ async def download_subtitles(
     include_metadata: bool = Query(
         True, description="是否包含元資料（VTT 和 JSON 格式）"
     ),
+    swap_bilingual_lines: bool = Query(
+        False,
+        description="雙語字幕是否交換第1、2行（使檔案行序與「以第2行為主」預覽一致）",
+    ),
 ):
     """下載編輯後的字幕"""
     from backend.services.subtitle_converter import SubtitleConverter
@@ -436,6 +446,18 @@ async def download_subtitles(
     try:
         # 載入字幕資料
         subtitle_collection = SubtitleService.load_subtitle_data(task_id, tasks)
+
+        if swap_bilingual_lines:
+            from backend.shared.text_processing import swap_first_two_lines
+
+            subtitle_collection = subtitle_collection.model_copy(
+                update={
+                    "subtitles": [
+                        s.model_copy(update={"text": swap_first_two_lines(s.text)})
+                        for s in subtitle_collection.subtitles
+                    ]
+                }
+            )
 
         # 使用新的轉換器
         converter = SubtitleConverter()
@@ -747,4 +769,342 @@ async def delete_retranscribe_task(
         raise HTTPException(status_code=500, detail=f"刪除重新轉錄任務時出錯: {str(e)}")
 
 
-# 注意：字幕格式生成函數已移至 subtitle_converter.py 模組
+# ---------------------------------------------------------------------------
+# Burn-in (hardcoded subtitles into video via FFmpeg)
+# ---------------------------------------------------------------------------
+class BurnInRequest(BaseModel):
+    font_size: int = 22
+    font_color: str = "FFFFFF"
+    outline_color: str = "000000"
+    outline_width: int = 2
+    margin_v: int = 30
+
+
+@router.post("/{task_id}/burn-in")
+async def start_subtitle_burn_in(
+    req: BurnInRequest,
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+):
+    """將目前字幕燒錄（硬嵌入）至影片"""
+    from backend.services.burn_in_service import start_burn_in
+
+    tasks = get_tasks_storage()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    task = tasks[task_id]
+    if task.status != "completed" or not task.result:
+        raise HTTPException(status_code=400, detail="任務尚未完成")
+
+    video_path = _find_video_path(task)
+    if not video_path:
+        raise HTTPException(status_code=404, detail="找不到影片文件，無法燒錄字幕")
+
+    subtitle_collection = SubtitleService.load_subtitle_data(task_id, tasks)
+    subs = [
+        {
+            "start_time": s.start_time,
+            "end_time": s.end_time,
+            "text": s.text,
+            "speaker": getattr(s, "speaker", None),
+        }
+        for s in subtitle_collection.subtitles
+    ]
+
+    output_dir = task.result["output_dir"]
+    burn_id = start_burn_in(
+        task_id, subs, video_path, output_dir,
+        font_size=req.font_size,
+        font_color=req.font_color,
+        outline_color=req.outline_color,
+        outline_width=req.outline_width,
+        margin_v=req.margin_v,
+    )
+    return {"burn_id": burn_id, "status": "processing"}
+
+
+@router.get("/burn-in/{burn_id}")
+async def get_burn_in_status(
+    burn_id: str = FastAPIPath(..., description="燒錄任務 ID"),
+):
+    """查詢字幕燒錄進度"""
+    from backend.services.burn_in_service import get_burn_in_task
+
+    task = get_burn_in_task(burn_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="燒錄任務不存在")
+    return {
+        "burn_id": task["id"],
+        "status": task["status"],
+        "progress": task["progress"],
+        "error": task["error"],
+    }
+
+
+@router.get("/burn-in/{burn_id}/download")
+async def download_burn_in_result(
+    burn_id: str = FastAPIPath(..., description="燒錄任務 ID"),
+):
+    """下載燒錄完成的影片"""
+    from backend.services.burn_in_service import get_burn_in_task
+
+    task = get_burn_in_task(burn_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="燒錄任務不存在")
+    if task["status"] != "completed":
+        raise HTTPException(status_code=400, detail="燒錄尚未完成")
+    output = task.get("output_path", "")
+    if not output or not os.path.exists(output):
+        raise HTTPException(status_code=404, detail="燒錄結果文件不存在")
+    return FileResponse(
+        path=output,
+        filename=os.path.basename(output),
+        media_type="video/mp4",
+    )
+
+
+def _find_video_path(task) -> Optional[str]:
+    """Find the video file path from a completed task."""
+    if not task.result or not task.result.get("files"):
+        return None
+    for key in ["video", "mp4", "avi", "mov", "mkv", "webm", "flv", "wmv", "m4v"]:
+        if key in task.result["files"]:
+            path = task.result["files"][key]
+            if isinstance(path, str) and os.path.exists(path):
+                return path
+    video_exts = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".wmv", ".m4v"}
+    for _, path in task.result["files"].items():
+        if isinstance(path, str) and os.path.exists(path):
+            if os.path.splitext(path)[1].lower() in video_exts:
+                return path
+    return None
+
+
+# ---------------------------------------------------------------------------
+# LLM subtitle enhancement (SSE streaming with per-batch progress)
+# ---------------------------------------------------------------------------
+class SubtitleSegment(BaseModel):
+    index: int
+    start_time: float
+    end_time: float
+    text: str
+
+
+class EnhanceRequest(BaseModel):
+    subtitles: List[SubtitleSegment]
+    api_key: str
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+    content_hint: Optional[str] = None
+    merge_short: bool = True
+    mode: str = "enhance"
+    target_language: Optional[str] = None
+    bilingual: bool = False
+
+
+@router.post("/enhance")
+async def enhance_subtitles_endpoint(req: EnhanceRequest):
+    """SSE streaming: merge short segments, LLM correct, return full subtitles."""
+    if not req.subtitles:
+        raise HTTPException(status_code=400, detail="必須提供至少一行字幕")
+    if not req.api_key:
+        raise HTTPException(status_code=400, detail="必須提供 API Key")
+
+    from starlette.responses import StreamingResponse
+    from backend.shared.llm_postprocess import (
+        _chunk_lines, _call_llm, _friendly_error, _BATCH_COOLDOWN,
+        _MAX_LINES_PER_BATCH_TRANSLATE, _MAX_CHARS_PER_BATCH_TRANSLATE,
+        _CONTEXT_OVERLAP,
+        merge_short_segments, resplit_long_segments, build_translate_prompt,
+    )
+
+    segments = [
+        {"id": s.index, "start": s.start_time, "end": s.end_time, "text": s.text}
+        for s in req.subtitles
+    ]
+
+    if req.merge_short:
+        segments = merge_short_segments(segments)
+
+    lines = [seg["text"] for seg in segments]
+
+    is_translate = req.mode == "translate" and req.target_language
+    translate_prompt = build_translate_prompt(req.target_language) if is_translate else None
+    original_lines = list(lines) if (is_translate and req.bilingual) else None
+
+    if is_translate:
+        chunks = _chunk_lines(
+            lines,
+            max_lines=_MAX_LINES_PER_BATCH_TRANSLATE,
+            max_chars=_MAX_CHARS_PER_BATCH_TRANSLATE,
+        )
+    else:
+        chunks = _chunk_lines(lines)
+    total_chunks = len(chunks)
+
+    def generate():
+        try:
+            from openai import OpenAI
+        except ImportError:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'openai 套件未安裝'})}\n\n"
+            return
+
+        merged_count = len(req.subtitles) - len(segments)
+        if merged_count > 0:
+            yield f"data: {json.dumps({'type': 'info', 'message': f'已合併 {merged_count} 個過短段落'})}\n\n"
+
+        if is_translate:
+            yield f"data: {json.dumps({'type': 'info', 'message': f'正在翻譯為{req.target_language}...'})}\n\n"
+
+        from backend.shared.llm_postprocess import _rewrite_localhost_url
+        client = OpenAI(api_key=req.api_key, base_url=_rewrite_localhost_url(req.base_url.rstrip("/")))
+        corrected = list(lines)
+
+        for chunk_idx, indices in enumerate(chunks):
+            chunk_lines_batch = [lines[i] for i in indices]
+
+            progress_pct = int((chunk_idx / total_chunks) * 100)
+            yield f"data: {json.dumps({'type': 'progress', 'batch': chunk_idx + 1, 'total': total_chunks, 'percent': progress_pct})}\n\n"
+
+            if chunk_idx > 0:
+                import time as _time
+                _time.sleep(_BATCH_COOLDOWN)
+
+            prev_ctx = None
+            next_ctx = None
+            if total_chunks > 1:
+                if chunk_idx > 0:
+                    prev_indices = chunks[chunk_idx - 1]
+                    prev_ctx = [lines[i] for i in prev_indices[-_CONTEXT_OVERLAP:]]
+                if chunk_idx < total_chunks - 1:
+                    next_indices = chunks[chunk_idx + 1]
+                    next_ctx = [lines[i] for i in next_indices[:_CONTEXT_OVERLAP]]
+
+            try:
+                result = _call_llm(
+                    client, req.model, chunk_lines_batch, req.content_hint,
+                    system_prompt=translate_prompt,
+                    numbered=bool(is_translate),
+                    prev_context=prev_ctx, next_context=next_ctx,
+                )
+                for j, idx in enumerate(indices):
+                    corrected[idx] = result[j]
+            except Exception as exc:
+                msg = _friendly_error(exc) if callable(_friendly_error) else str(exc)
+                yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
+                return
+
+        yield f"data: {json.dumps({'type': 'progress', 'batch': total_chunks, 'total': total_chunks, 'percent': 100})}\n\n"
+
+        if original_lines:
+            for i in range(len(corrected)):
+                if corrected[i] and corrected[i] != original_lines[i]:
+                    corrected[i] = f"{original_lines[i]}\n{corrected[i]}"
+
+        post_llm = []
+        for i, seg in enumerate(segments):
+            post_llm.append({
+                "id": i,
+                "start": seg["start"],
+                "end": seg["end"],
+                "text": corrected[i] if corrected[i] else seg["text"],
+            })
+
+        if not is_translate:
+            post_llm = resplit_long_segments(post_llm)
+
+        result_subs = [
+            {"index": s["id"], "start_time": s["start"], "end_time": s["end"], "text": s["text"]}
+            for s in post_llm
+        ]
+
+        yield f"data: {json.dumps({'type': 'result', 'subtitles': result_subs})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+class SummarizeRequest(BaseModel):
+    api_key: str
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+    content_hint: Optional[str] = None
+
+
+@router.post("/{task_id}/summarize")
+async def summarize_subtitles_endpoint(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    req: SummarizeRequest = ...,
+):
+    """Generate AI summary and timestamped chapters for a task."""
+    tasks = get_tasks_storage()
+    subtitle_data = SubtitleService.load_subtitle_data(task_id, tasks)
+
+    segments = [
+        {"start": s.start_time, "end": s.end_time, "text": s.text}
+        for s in subtitle_data.subtitles
+    ]
+
+    try:
+        from backend.shared.llm_postprocess import (
+            summarize_subtitles as _summarize,
+        )
+        notes = _summarize(
+            segments,
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+            content_hint=req.content_hint,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        logger.error(
+            "summarize failed for %s: %s", task_id, e, exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="摘要生成失敗")
+
+    task = tasks[task_id]
+    output_dir = None
+    if task.result and task.result.get("files"):
+        first_file = next(iter(task.result["files"].values()), None)
+        if first_file:
+            output_dir = os.path.dirname(first_file)
+
+    if output_dir:
+        notes_path = os.path.join(
+            output_dir, f"{task_id}_notes.json"
+        )
+        try:
+            with open(notes_path, "w", encoding="utf-8") as f:
+                json.dump(notes, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning("Could not save notes file: %s", e)
+
+    return notes
+
+
+@router.get("/{task_id}/notes")
+async def get_subtitle_notes(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+):
+    """Return previously generated notes, or 404 if not yet generated."""
+    tasks = get_tasks_storage()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    task = tasks[task_id]
+    if not task.result or not task.result.get("files"):
+        raise HTTPException(status_code=404, detail="找不到輸出目錄")
+
+    first_file = next(iter(task.result["files"].values()), None)
+    if not first_file:
+        raise HTTPException(status_code=404, detail="找不到輸出目錄")
+
+    notes_path = os.path.join(
+        os.path.dirname(first_file), f"{task_id}_notes.json"
+    )
+    if not os.path.isfile(notes_path):
+        raise HTTPException(status_code=404, detail="尚未生成摘要")
+
+    with open(notes_path, "r", encoding="utf-8") as f:
+        return json.load(f)
