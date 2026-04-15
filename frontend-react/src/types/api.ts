@@ -67,6 +67,7 @@ export interface Task {
   folder_id?: string
   sort_order?: number
   partial_segments?: PartialSegment[]
+  source_file_path?: string
 }
 
 export interface SubtitleNotes {

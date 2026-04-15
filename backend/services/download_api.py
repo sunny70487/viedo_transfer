@@ -30,6 +30,27 @@ async def download_result(task_id: str, file_type: str, request: Request):
         raise HTTPException(status_code=404, detail="任務不存在")
 
     task = tasks[task_id]
+
+    # Allow video preview from source file while task is still processing
+    if task.status != "completed" and file_type == "video":
+        source = getattr(task, "source_file_path", None)
+        if source and os.path.isfile(source):
+            ext = os.path.splitext(source)[1].lower()
+            if ext in VIDEO_EXTENSIONS:
+                media_type = get_media_type(source)
+                return FileResponse(
+                    path=source,
+                    filename=os.path.basename(source),
+                    media_type=media_type,
+                    headers={
+                        "Accept-Ranges": "bytes",
+                        "Cache-Control": "no-cache",
+                    },
+                )
+        raise HTTPException(
+            status_code=404, detail="影片尚未就緒"
+        )
+
     if task.status != "completed" or not task.result:
         raise HTTPException(status_code=400, detail="任務尚未完成或沒有結果")
 

@@ -178,6 +178,7 @@ class Task(BaseModel):
     folder_id: Optional[str] = None
     sort_order: float = 0.0
     partial_segments: Optional[List[Dict[str, Any]]] = None
+    source_file_path: Optional[str] = None
 
 
 class TranscriptionRequest(BaseModel):
@@ -382,6 +383,10 @@ def process_transcription(
             )
         else:
             task.progress = 30.0
+
+        # Store source path so the video can be served during transcription
+        if file_path and os.path.isfile(file_path):
+            task.source_file_path = file_path
 
         task.message = "正在執行轉錄..."
 
