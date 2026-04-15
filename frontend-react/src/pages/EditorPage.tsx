@@ -11,6 +11,7 @@ import { SubtitleRow } from '@/components/editor/SubtitleRow'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/editor/VideoPlayer'
 import { ExportDialog } from '@/components/editor/ExportDialog'
 import { LlmEnhanceDialog } from '@/components/editor/LlmEnhanceDialog'
+import { SummaryPanel } from '@/components/editor/SummaryPanel'
 import { useSubtitles, useSaveSubtitles } from '@/hooks/use-subtitles'
 import { useTask } from '@/hooks/use-task'
 import { useEditorStore } from '@/stores/editor-store'
@@ -248,6 +249,11 @@ export function EditorPage() {
             subtitles={isStreaming ? streamingSubtitles : subtitles}
             onTimeUpdate={setVideoTime}
           />
+          <SummaryPanel
+            taskId={taskId}
+            onSeekTo={(t) => videoRef.current?.seek(t)}
+            disabled={isStreaming}
+          />
           <Card className="p-4">
             <div className="grid grid-cols-3 gap-4 text-center text-sm">
               <div>
@@ -323,9 +329,7 @@ export function EditorPage() {
         open={enhanceOpen}
         onClose={() => setEnhanceOpen(false)}
         subtitles={subtitles}
-        taskId={taskId}
         onEnhanced={replaceSubtitles}
-        onSeekTo={(time) => videoRef.current?.seek(time)}
       />
       {shortcutsOpen && (
         <div
