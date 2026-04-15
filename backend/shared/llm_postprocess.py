@@ -548,6 +548,22 @@ def enhance_subtitles(
     return enhanced
 
 
+def _parse_chapter_time(value: object) -> float:
+    """Convert "MM:SS", "HH:MM:SS", or numeric seconds to float seconds."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        parts = value.strip().split(":")
+        try:
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + float(parts[1])
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+        except (ValueError, IndexError):
+            pass
+    return 0.0
+
+
 _SUMMARIZE_SYSTEM_PROMPT = """\
 你是一位影片內容分析師。請根據以下字幕逐字稿，完成兩件事：
 
@@ -558,8 +574,9 @@ _SUMMARIZE_SYSTEM_PROMPT = """\
 - 使用與字幕相同的語言回答。
 - 只輸出合法的 JSON，不要加入任何 Markdown 或解釋文字。
 - 格式必須完全符合：\
-{"summary": "...", "chapters": [{"time": 0.0, "title": "..."}, ...]}
-- time 為該章節開始的秒數（浮點數）。
+{"summary": "...", "chapters": [{"time": "MM:SS", "title": "..."}, ...]}
+- time 必須直接複製字幕中的時間戳（例如 "04:42"、"12:30"），\
+不要換算、不要猜測，只能使用字幕開頭出現過的時間戳。
 """
 
 
@@ -624,7 +641,7 @@ def summarize_subtitles(
             "summary": str(data.get("summary", "")),
             "chapters": [
                 {
-                    "time": float(c.get("time", 0.0)),
+                    "time": _parse_chapter_time(c.get("time", 0)),
                     "title": str(c.get("title", "")),
                 }
                 for c in data.get("chapters", [])
