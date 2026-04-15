@@ -29,7 +29,9 @@ from backend.shared.download_helpers import download_from_url  # noqa: F401 — 
 from backend.shared.text_processing import (
     convert_to_traditional as _convert_to_traditional,
     strip_punctuation as _strip_punctuation,
+    smart_strip_punctuation as _smart_strip_punctuation,
     split_long_segments as _split_long_segments,
+    _join_words_text,
 )
 from backend.shared.split_audio_helpers import split_audio
 from backend.shared.transcribe_helpers import check_gpu, format_timestamp
@@ -307,7 +309,7 @@ def _merge_segments_by_pause(
 
         if soft_break or hard_break:
             # Finalize current segment
-            text = _strip_punctuation("".join(w["word"] for w in current_words))
+            text = _smart_strip_punctuation(_join_words_text(current_words))
             new_segments.append(
                 {
                     "id": len(new_segments),
@@ -324,7 +326,7 @@ def _merge_segments_by_pause(
 
     # Flush remaining words
     if current_words:
-        text = _strip_punctuation("".join(w["word"] for w in current_words))
+        text = _smart_strip_punctuation(_join_words_text(current_words))
         new_segments.append(
             {
                 "id": len(new_segments),
@@ -506,9 +508,8 @@ def transcribe_audio(
                     for w in seg_words:
                         w["word"] = _convert_to_traditional(w["word"])
 
-                    # Post-processing: 移除標點符號
                     for seg in seg_segments:
-                        seg["text"] = _strip_punctuation(seg["text"])
+                        seg["text"] = _smart_strip_punctuation(seg["text"])
 
                     # Post-processing: merge short segments into natural sentences
                     seg_segments, seg_words = _merge_segments_by_pause(
@@ -562,6 +563,13 @@ def transcribe_audio(
 
                         segments_json.append(seg)
                         words_data.extend(seg.get("words", []))
+                        if status_callback:
+                            status_callback(segment={
+                                "start": seg.get("start", 0.0),
+                                "end": seg.get("end", 0.0),
+                                "text": seg.get("text", ""),
+                                "speaker": seg.get("speaker"),
+                            })
 
                     if segment_texts:
                         start_label = format_timestamp(
@@ -635,9 +643,8 @@ def transcribe_audio(
             for w in seg_words:
                 w["word"] = _convert_to_traditional(w["word"])
 
-            # Post-processing: 移除標點符號
             for seg in seg_segments:
-                seg["text"] = _strip_punctuation(seg["text"])
+                seg["text"] = _smart_strip_punctuation(seg["text"])
 
             # Post-processing: merge short segments into natural sentences
             # by detecting speech pauses in word-level timestamps
@@ -645,6 +652,14 @@ def transcribe_audio(
 
             segments_json.extend(seg_segments)
             words_data.extend(seg_words)
+            if status_callback:
+                for seg in seg_segments:
+                    status_callback(segment={
+                        "start": seg.get("start", 0.0),
+                        "end": seg.get("end", 0.0),
+                        "text": seg.get("text", ""),
+                        "speaker": seg.get("speaker"),
+                    })
 
         # Try to detect language from the model/result if not set
         if detected_language is None and language:
