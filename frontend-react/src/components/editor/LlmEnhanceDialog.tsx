@@ -1,11 +1,11 @@
-﻿import { useState, useEffect } from 'react'
-import { Settings, Sparkles, Languages } from 'lucide-react'
+﻿import { useState, useEffect, useCallback } from 'react'
+import { Settings, Sparkles, Languages, BookOpen, Copy, Check } from 'lucide-react'
 import { Dialog } from '@/components/ui/Dialog'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toast-store'
 import { loadLlmSettings, saveLlmSettings } from '@/hooks/use-llm-settings'
-import type { Subtitle } from '@/types/api'
+import type { Subtitle, SubtitleNotes } from '@/types/api'
 
 const TARGET_LANGUAGES = [
   { value: '英文', label: 'English' },
@@ -23,24 +23,36 @@ const TARGET_LANGUAGES = [
   { value: 'Tiếng Việt', label: 'Tiếng Việt' },
 ]
 
-type DialogMode = 'enhance' | 'translate'
+type DialogMode = 'enhance' | 'translate' | 'summarize'
 
 interface LlmEnhanceDialogProps {
   open: boolean
   onClose: () => void
   subtitles: Subtitle[]
+  taskId: string
   onEnhanced: (subs: Subtitle[]) => void
+  onSeekTo?: (time: number) => void
 }
 
-export function LlmEnhanceDialog({ open, onClose, subtitles, onEnhanced }: Readonly<LlmEnhanceDialogProps>) {
+export function LlmEnhanceDialog({
+  open, onClose, subtitles, taskId, onEnhanced, onSeekTo,
+}: Readonly<LlmEnhanceDialogProps>) {
   const [mode, setMode] = useState<DialogMode>('enhance')
   const [contentHint, setContentHint] = useState('')
   const [apiKeySet, setApiKeySet] = useState(false)
+
+  // enhance / translate state
   const [enhancing, setEnhancing] = useState(false)
   const [progress, setProgress] = useState({ batch: 0, total: 0, percent: 0 })
   const [infoMsg, setInfoMsg] = useState('')
   const [targetLang, setTargetLang] = useState('英文')
   const [bilingual, setBilingual] = useState(false)
+
+  // summarize state
+  const [notes, setNotes] = useState<SubtitleNotes | null>(null)
+  const [summarizing, setSummarizing] = useState(false)
+  const [summaryError, setSummaryError] = useState('')
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!open) return
@@ -48,6 +60,13 @@ export function LlmEnhanceDialog({ open, onClose, subtitles, onEnhanced }: Reado
     setContentHint(s.content_hint)
     setApiKeySet(Boolean(s.api_key))
   }, [open])
+
+  useEffect(() => {
+    if (!open || mode !== 'summarize') return
+    api.getSubtitleNotes(taskId)
+      .then((n) => { if (n) setNotes(n) })
+      .catch(() => {})
+  }, [open, mode, taskId])
 
   const handleEnhance = async () => {
     const s = loadLlmSettings()
@@ -115,8 +134,38 @@ export function LlmEnhanceDialog({ open, onClose, subtitles, onEnhanced }: Reado
     }
   }
 
+  const handleSummarize = useCallback(async () => {
+    const s = loadLlmSettings()
+    if (!s.api_key) { toast('error', '請先在右上角 ⚙️ 設定 LLM API Key'); return }
+
+    setSummarizing(true)
+    setSummaryError('')
+    try {
+      const result = await api.summarizeSubtitles(taskId, {
+        api_key: s.api_key,
+        base_url: s.base_url,
+        model: s.model,
+        content_hint: s.content_hint || undefined,
+      })
+      setNotes(result)
+    } catch (e) {
+      setSummaryError((e as Error).message)
+    } finally {
+      setSummarizing(false)
+    }
+  }, [taskId])
+
+  const handleCopySummary = useCallback(async () => {
+    if (!notes?.summary) return
+    await navigator.clipboard.writeText(notes.summary)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [notes?.summary])
+
   const canEnhance = apiKeySet && subtitles.length > 0
-  const dialogTitle = mode === 'translate' ? 'AI 字幕翻譯' : 'AI 字幕增強'
+  const dialogTitle = mode === 'summarize'
+    ? 'AI 摘要'
+    : mode === 'translate' ? 'AI 字幕翻譯' : 'AI 字幕增強'
 
   return (
     <Dialog open={open} onClose={onClose} title={dialogTitle}>
@@ -151,16 +200,34 @@ export function LlmEnhanceDialog({ open, onClose, subtitles, onEnhanced }: Reado
               <Languages className="h-3.5 w-3.5" aria-hidden="true" />
               翻譯字幕
             </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === 'summarize'}
+              aria-label="生成摘要"
+              className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors cursor-pointer ${
+                mode === 'summarize'
+                  ? 'bg-primary text-white'
+                  : 'text-text dark:text-text-dark hover:bg-gray-50 dark:hover:bg-gray-800'
+              }`}
+              onClick={() => setMode('summarize')}
+            >
+              <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+              摘要
+            </button>
           </div>
         )}
 
-        <p className="text-sm text-muted dark:text-muted-dark">
-          {mode === 'translate'
-            ? `將 ${subtitles.length} 行字幕翻譯為其他語言。`
-            : `修正音譯錯誤、還原英文術語、改善標點，並自動合併過短的斷句。共 ${subtitles.length} 行字幕。`
-          }
-        </p>
+        {mode !== 'summarize' && (
+          <p className="text-sm text-muted dark:text-muted-dark">
+            {mode === 'translate'
+              ? `將 ${subtitles.length} 行字幕翻譯為其他語言。`
+              : `修正音譯錯誤、還原英文術語、改善標點，並自動合併過短的斷句。共 ${subtitles.length} 行字幕。`
+            }
+          </p>
+        )}
 
+        {/* ── enhance / translate progress ── */}
         {enhancing && (
           <div className="space-y-2">
             {infoMsg && (
@@ -189,7 +256,8 @@ export function LlmEnhanceDialog({ open, onClose, subtitles, onEnhanced }: Reado
           </div>
         )}
 
-        {!enhancing && (
+        {/* ── enhance / translate fields ── */}
+        {!enhancing && mode !== 'summarize' && (
           <>
             {!apiKeySet && (
               <div
@@ -246,21 +314,129 @@ export function LlmEnhanceDialog({ open, onClose, subtitles, onEnhanced }: Reado
           </>
         )}
 
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" size="sm" onClick={onClose} disabled={enhancing}>
-            取消
-          </Button>
-          <Button size="sm" onClick={handleEnhance} disabled={!canEnhance || enhancing} loading={enhancing}>
-            {mode === 'translate'
-              ? <Languages className="h-4 w-4" aria-hidden="true" />
-              : <Sparkles className="h-4 w-4" aria-hidden="true" />
-            }
-            {enhancing
-              ? `${mode === 'translate' ? '翻譯' : '增強'}中 (${progress.batch}/${progress.total})`
-              : mode === 'translate' ? '開始翻譯' : '開始增強'
-            }
-          </Button>
-        </div>
+        {/* ── summarize skeleton (loading) ── */}
+        {mode === 'summarize' && summarizing && (
+          <div className="space-y-3" aria-live="polite" aria-busy="true">
+            <div className="rounded-lg border border-border dark:border-border-dark p-3 space-y-2">
+              <div className="h-3 w-full rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+              <div className="h-3 w-4/5 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+              <div className="h-3 w-3/5 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+            </div>
+            <div className="space-y-1.5">
+              {[1, 2, 3].map((n) => (
+                <div key={n} className="flex items-center gap-2 px-2 py-2.5">
+                  <div className="h-3 w-10 rounded bg-gray-200 dark:bg-gray-700 animate-pulse shrink-0" />
+                  <div className="h-3 flex-1 rounded bg-gray-200 dark:bg-gray-700 animate-pulse" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── summarize results / generate ── */}
+        {mode === 'summarize' && !summarizing && (
+          <div className="space-y-3">
+            {summaryError && (
+              <p className="text-sm text-danger" role="alert">{summaryError}</p>
+            )}
+            {!apiKeySet && (
+              <div
+                role="alert"
+                className="flex items-center gap-2 rounded-lg border border-amber-300 dark:border-amber-600 bg-amber-50 dark:bg-amber-900/20 px-3 py-2 text-sm text-amber-700 dark:text-amber-400"
+              >
+                <Settings className="h-4 w-4 shrink-0" aria-hidden="true" />
+                請先點選右上角 ⚙️ 設定 LLM API Key
+              </div>
+            )}
+            {notes ? (
+              <>
+                <div className="relative rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark p-3">
+                  <p className="text-sm text-text dark:text-text-dark leading-relaxed pr-8">
+                    {notes.summary}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleCopySummary}
+                    aria-label="複製摘要"
+                    className="absolute top-2 right-2 p-1.5 rounded text-muted hover:text-text dark:hover:text-text-dark transition-colors"
+                  >
+                    {copied
+                      ? <Check className="h-3.5 w-3.5 text-green-500" aria-hidden="true" />
+                      : <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    }
+                  </button>
+                </div>
+                {notes.chapters.length > 0 && (
+                  <div className="space-y-0.5">
+                    <p className="text-xs font-medium text-muted dark:text-muted-dark uppercase tracking-wider px-2 pb-1">
+                      章節
+                    </p>
+                    {notes.chapters.map((ch, i) => {
+                      const m = Math.floor(ch.time / 60)
+                      const s = Math.floor(ch.time % 60)
+                      const ts = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+                      return (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => onSeekTo?.(ch.time)}
+                          aria-label={`跳至 ${ts} — ${ch.title}`}
+                          className="flex items-center gap-2 w-full text-left px-2 py-2.5 min-h-[44px] rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group"
+                        >
+                          <span className="font-mono text-xs text-primary shrink-0 tabular-nums">{ts}</span>
+                          <span className="text-sm text-text dark:text-text-dark group-hover:text-primary transition-colors">{ch.title}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSummarize}
+                  disabled={!apiKeySet}
+                  className="w-full"
+                >
+                  重新生成
+                </Button>
+              </>
+            ) : (
+              <Button
+                size="sm"
+                onClick={handleSummarize}
+                disabled={!apiKeySet}
+                className="w-full"
+              >
+                <BookOpen className="h-4 w-4" aria-hidden="true" />
+                開始生成摘要
+              </Button>
+            )}
+          </div>
+        )}
+
+        {/* ── action row ── */}
+        {mode !== 'summarize' && (
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="outline" size="sm" onClick={onClose} disabled={enhancing}>
+              取消
+            </Button>
+            <Button size="sm" onClick={handleEnhance} disabled={!canEnhance || enhancing} loading={enhancing}>
+              {mode === 'translate'
+                ? <Languages className="h-4 w-4" aria-hidden="true" />
+                : <Sparkles className="h-4 w-4" aria-hidden="true" />
+              }
+              {enhancing
+                ? `${mode === 'translate' ? '翻譯' : '增強'}中 (${progress.batch}/${progress.total})`
+                : mode === 'translate' ? '開始翻譯' : '開始增強'
+              }
+            </Button>
+          </div>
+        )}
+        {mode === 'summarize' && !summarizing && (
+          <div className="flex justify-end pt-2">
+            <Button variant="outline" size="sm" onClick={onClose}>關閉</Button>
+          </div>
+        )}
       </div>
     </Dialog>
   )
