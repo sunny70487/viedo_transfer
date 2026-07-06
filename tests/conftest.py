@@ -1,6 +1,9 @@
+import shutil
 import sys
 import types
 from unittest.mock import MagicMock
+
+import pytest
 
 
 def _register_stub(name: str, attrs: dict | None = None) -> None:
@@ -56,3 +59,21 @@ try:
     import dotenv  # noqa: F401
 except ImportError:
     _register_stub("dotenv", {"load_dotenv": lambda *a, **kw: None})
+
+
+@pytest.fixture(autouse=True)
+def _skip_ffmpeg_check_when_not_installed(monkeypatch):
+    """Neutralize AudioSegmentService._check_ffmpeg on hosts without ffmpeg.
+
+    Windows CI runners do not ship ffmpeg; the real check raises at __init__
+    time, preventing services from being constructed even in unit tests that
+    never touch audio processing.
+    """
+    if shutil.which("ffmpeg"):
+        return
+    from backend.services import audio_segment_service
+    monkeypatch.setattr(
+        audio_segment_service.AudioSegmentService,
+        "_check_ffmpeg",
+        lambda self: None,
+    )
