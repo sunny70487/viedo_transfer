@@ -87,6 +87,7 @@ def write_output_files(
     output_files,
     *,
     speakers=None,
+    model_name=None,
     verbose=False,
     show_in_terminal=False,
 ):
@@ -115,6 +116,7 @@ def write_output_files(
         "language": detected_language,
         "language_probability": language_probability,
         "words": words_data if words_data else None,
+        "model_name": model_name,
     }
     if speakers:
         json_data["speakers"] = speakers

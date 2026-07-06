@@ -5,20 +5,10 @@ import argparse
 import os
 import time
 import torch
-import numpy as np
-import tempfile
-import re
-import subprocess  # 確保導入 subprocess 用於調用外部命令
 from pathlib import Path
 from faster_whisper import WhisperModel
-from pydub import AudioSegment
-import yt_dlp
-import multiprocessing as mp
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.shared.download_helpers import (
-    build_safe_title,
-    build_yt_dlp_options,
     download_from_url as shared_download_from_url,
 )
 from backend.shared.transcribe_helpers import (
@@ -635,16 +625,6 @@ def main():
 
         if not downloaded_file:
             # 嘗試在可能的位置尋找檔案，而不是直接失敗
-            possible_title = (
-                args.url.split("=")[-1] if "=" in args.url else args.url.split("/")[-1]
-            )
-            safe_title = "".join(
-                [
-                    c if c.isalnum() or c in [" ", "-", "_"] else "_"
-                    for c in possible_title
-                ]
-            )
-
             # 確定搜索目錄
             search_path = Path(args.output_dir) if args.output_dir else Path.cwd()
 

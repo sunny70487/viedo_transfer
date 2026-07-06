@@ -131,12 +131,13 @@ def download_from_url(
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info_dict = ydl.extract_info(url, download=True)
-            if not downloaded_file and "requested_downloads" in info_dict:
+            if "requested_downloads" in info_dict:
                 for download in info_dict["requested_downloads"]:
-                    downloaded_file = download.get("filepath")
-                    if downloaded_file:
+                    filepath = download.get("filepath")
+                    if filepath:
+                        downloaded_file = filepath
                         if verbose:
-                            print(f"使用已存在的檔案：{downloaded_file}")
+                            print(f"使用最終輸出檔案：{downloaded_file}")
                         break
 
             if not downloaded_file and "title" in info_dict and "ext" in info_dict:

@@ -5,20 +5,12 @@ import argparse
 import os
 import time
 import torch
-import numpy as np
-import tempfile
 import re
 import subprocess  # 確保導入 subprocess 用於調用外部命令
 from pathlib import Path
 from funasr import AutoModel
-from pydub import AudioSegment
-import yt_dlp
-import multiprocessing as mp
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from backend.shared.download_helpers import (
-    build_safe_title,
-    build_yt_dlp_options,
     download_from_url as shared_download_from_url,
 )
 from backend.shared.split_audio_helpers import split_audio as shared_split_audio
@@ -36,13 +28,10 @@ from backend.shared.transcription_pipeline import (
 
 from backend.shared.text_processing import (
     convert_to_traditional as _convert_to_traditional,
-    strip_punctuation as _strip_punctuation,
     smart_strip_punctuation as _smart_strip_punctuation,
     split_long_segments as _split_long_segments,
     space_english_tokens as _space_english_tokens,
     rebuild_segment_text_from_timestamps as _rebuild_from_ts,
-    _join_words_text,
-    OPENCC_AVAILABLE,
 )
 
 # 嘗試導入 tqdm 用於顯示進度條，但如果不可用也能繼續執行
@@ -666,6 +655,7 @@ def transcribe_audio(
         detected_language,
         language_probability,
         output_files,
+        model_name=model_name,
         verbose=verbose,
         show_in_terminal=show_in_terminal,
     )
@@ -861,16 +851,6 @@ def main():
 
         if not downloaded_file:
             # 嘗試在可能的位置尋找檔案，而不是直接失敗
-            possible_title = (
-                args.url.split("=")[-1] if "=" in args.url else args.url.split("/")[-1]
-            )
-            safe_title = "".join(
-                [
-                    c if c.isalnum() or c in [" ", "-", "_"] else "_"
-                    for c in possible_title
-                ]
-            )
-
             # 確定搜索目錄
             search_path = Path(args.output_dir) if args.output_dir else Path.cwd()
 

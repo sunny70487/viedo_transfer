@@ -11,7 +11,7 @@ import tempfile
 import subprocess
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field, validator
 import shutil
 
@@ -272,21 +272,6 @@ class AudioSegmentService:
                 error_message=error_msg
             )
     
-    def extract_multiple_segments(self, requests: list[AudioSegmentRequest], 
-                                output_dir: Optional[str] = None) -> list[AudioSegmentResult]:
-        """批量提取音頻片段"""
-        results = []
-        
-        for i, request in enumerate(requests):
-            logger.info(f"處理第 {i+1}/{len(requests)} 個音頻片段")
-            result = self.extract_segment(request, output_dir)
-            results.append(result)
-            
-            if not result.success:
-                logger.warning(f"第 {i+1} 個片段提取失敗: {result.error_message}")
-        
-        return results
-    
     def cleanup_temp_files(self):
         """清理臨時文件"""
         if self.temp_dir and os.path.exists(self.temp_dir):
@@ -300,51 +285,3 @@ class AudioSegmentService:
     def __del__(self):
         """析構函數，自動清理臨時文件"""
         self.cleanup_temp_files()
-
-
-def create_audio_segment_service() -> AudioSegmentService:
-    """創建音頻片段提取服務實例"""
-    return AudioSegmentService()
-
-
-# 便利函數
-def extract_audio_segment(audio_file_path: str, start_time: float, end_time: float,
-                         output_format: str = "flac", quality: str = "high",
-                         output_dir: Optional[str] = None) -> AudioSegmentResult:
-    """便利函數：提取單個音頻片段"""
-    service = create_audio_segment_service()
-    
-    request = AudioSegmentRequest(
-        audio_file_path=audio_file_path,
-        start_time=start_time,
-        end_time=end_time,
-        output_format=output_format,
-        quality=quality
-    )
-    
-    try:
-        return service.extract_segment(request, output_dir)
-    finally:
-        service.cleanup_temp_files()
-
-
-def validate_audio_file(file_path: str) -> Tuple[bool, Optional[str]]:
-    """驗證音頻文件是否有效"""
-    try:
-        service = AudioSegmentService()
-        audio_info = service._get_audio_info(file_path)
-        
-        # 基本驗證
-        if audio_info['duration'] <= 0:
-            return False, "音頻文件時長無效"
-        
-        if audio_info['sample_rate'] <= 0:
-            return False, "音頻文件採樣率無效"
-        
-        if audio_info['channels'] <= 0:
-            return False, "音頻文件聲道數無效"
-        
-        return True, None
-        
-    except Exception as e:
-        return False, f"音頻文件驗證失敗: {str(e)}"

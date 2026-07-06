@@ -10,17 +10,12 @@ Drop-in replacement for funasr_transcribe with the same public API:
     download_from_url(...) → (file_path, folder_path)
 
 Utility functions (download_from_url, check_gpu, split_audio, format_timestamp,
-_convert_to_traditional, _strip_punctuation, _split_long_segments) are
+_convert_to_traditional, _split_long_segments) are
 re-used from funasr_transcribe to avoid duplication.
 """
 
-import os
 import time
 import threading
-import json
-import subprocess
-import re
-from pathlib import Path
 
 import torch
 
@@ -28,20 +23,17 @@ import torch
 from backend.shared.download_helpers import download_from_url  # noqa: F401 — re-exported
 from backend.shared.text_processing import (
     convert_to_traditional as _convert_to_traditional,
-    strip_punctuation as _strip_punctuation,
     smart_strip_punctuation as _smart_strip_punctuation,
     split_long_segments as _split_long_segments,
     _join_words_text,
 )
 from backend.shared.split_audio_helpers import split_audio
-from backend.shared.transcribe_helpers import check_gpu, format_timestamp
+from backend.shared.transcribe_helpers import format_timestamp
 from backend.shared.transcription_pipeline import (
     resolve_device,
     print_gpu_info,
     init_output_paths,
     init_buffers,
-    build_srt_entry,
-    build_vtt_entry,
     write_output_files,
 )
 from backend.shared.video_utils import maybe_prepare_video_output
@@ -786,6 +778,7 @@ def transcribe_audio(
         language_probability,
         output_files,
         speakers=speakers_detected if speakers_detected else None,
+        model_name=model_name,
         verbose=verbose,
         show_in_terminal=show_in_terminal,
     )

@@ -336,32 +336,6 @@ class RetranscribeService:
             logger.error(f"處理轉錄結果時出錯: {str(e)}")
             raise
 
-    def cleanup_completed_tasks(self, max_age_hours: int = 24):
-        """清理已完成的任務"""
-        try:
-            current_time = time.time()
-            max_age_seconds = max_age_hours * 3600
-
-            tasks_to_remove = []
-
-            with self._lock:
-                for task_id, task in self.retranscribe_tasks.items():
-                    if (
-                        task.status in ["completed", "failed"]
-                        and task.completed_at
-                        and current_time - task.completed_at > max_age_seconds
-                    ):
-                        tasks_to_remove.append(task_id)
-
-                for task_id in tasks_to_remove:
-                    del self.retranscribe_tasks[task_id]
-
-            if tasks_to_remove:
-                logger.info(f"已清理 {len(tasks_to_remove)} 個過期的重新轉錄任務")
-
-        except Exception as e:
-            logger.error(f"清理已完成任務時出錯: {str(e)}")
-
     def shutdown(self):
         """關閉服務"""
         try:
@@ -385,11 +359,3 @@ def get_retranscribe_service() -> RetranscribeService:
 
         _retranscribe_service = RetranscribeService(task_store=_task_store)
     return _retranscribe_service
-
-
-def shutdown_retranscribe_service():
-    """關閉重新轉錄服務"""
-    global _retranscribe_service
-    if _retranscribe_service:
-        _retranscribe_service.shutdown()
-        _retranscribe_service = None

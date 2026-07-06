@@ -37,16 +37,6 @@ def _generate_srt(subtitles: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def _escape_ffmpeg_path(path: str) -> str:
-    """Escape file path for FFmpeg subtitle filter strings."""
-    path = os.path.abspath(path).replace("\\", "/")
-    path = path.replace(":", "\\:")
-    path = path.replace("'", "\\'")
-    path = path.replace("[", "\\[")
-    path = path.replace("]", "\\]")
-    return path
-
-
 def _rgb_to_ass_color(hex_rgb: str) -> str:
     """Convert hex RGB (e.g. 'FFFFFF') to ASS colour &H00BBGGRR."""
     hex_rgb = hex_rgb.lstrip("#")

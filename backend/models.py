@@ -6,9 +6,8 @@
 定義所有與字幕編輯相關的 Pydantic 資料模型
 """
 
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, validator
-from datetime import datetime
 import logging
 import time
 
@@ -310,29 +309,6 @@ class RetranscribeTask(BaseModel):
         if v not in valid_statuses:
             raise ValueError(f"無效的狀態: {v}，有效狀態: {valid_statuses}")
         return v
-
-
-class SubtitleExportRequest(BaseModel):
-    """字幕匯出請求模型"""
-
-    task_id: str = Field(..., min_length=1, description="任務 ID")
-    format: str = Field(..., description="匯出格式")
-    include_timestamps: bool = Field(default=True, description="是否包含時間戳")
-    encoding: str = Field(default="utf-8", description="檔案編碼")
-
-    @validator("format")
-    def validate_format(cls, v):
-        valid_formats = {"srt", "vtt", "txt", "json", "ass", "ssa"}
-        if v.lower() not in valid_formats:
-            raise ValueError(f"不支援的格式: {v}，支援的格式: {valid_formats}")
-        return v.lower()
-
-    @validator("encoding")
-    def validate_encoding(cls, v):
-        valid_encodings = {"utf-8", "utf-16", "gbk", "big5"}
-        if v.lower() not in valid_encodings:
-            raise ValueError(f"不支援的編碼: {v}，支援的編碼: {valid_encodings}")
-        return v.lower()
 
 
 class SubtitleSearchRequest(BaseModel):
