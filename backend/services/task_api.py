@@ -116,7 +116,9 @@ async def get_batch_status(batch_id: str):
         "total": len(batch_tasks),
         "completed": statuses.count("completed"),
         "failed": statuses.count("failed"),
-        "in_progress": len([s for s in statuses if s not in ("completed", "failed", "queued")]),
+        "in_progress": len(
+            [s for s in statuses if s not in ("completed", "failed", "queued")]
+        ),
         "queued": statuses.count("queued"),
         "overall_progress": sum(progresses) / len(progresses) if progresses else 0,
         "tasks": batch_tasks,

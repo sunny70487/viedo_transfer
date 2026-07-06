@@ -33,15 +33,13 @@ def check_gpu(torch_module=None):
         for index in range(device_count):
             try:
                 device_properties = torch_module.cuda.get_device_properties(index)
+                _mem_alloc_mb = torch_module.cuda.memory_allocated(index) / 1024**2
+                _mem_reserved_mb = torch_module.cuda.memory_reserved(index) / 1024**2
                 gpu_info["devices"].append(
                     {
                         "name": torch_module.cuda.get_device_name(index),
-                        "memory_allocated": (
-                            f"{torch_module.cuda.memory_allocated(index) / 1024**2:.2f} MB"
-                        ),
-                        "memory_reserved": (
-                            f"{torch_module.cuda.memory_reserved(index) / 1024**2:.2f} MB"
-                        ),
+                        "memory_allocated": f"{_mem_alloc_mb:.2f} MB",
+                        "memory_reserved": f"{_mem_reserved_mb:.2f} MB",
                         "max_memory": (
                             f"{device_properties.total_memory / 1024**3:.2f} GB"
                         ),

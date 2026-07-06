@@ -39,14 +39,18 @@ class AudioSegmentRequest(BaseModel):
     def validate_output_format(cls, v):
         supported_formats = ['flac', 'wav', 'mp3', 'aac', 'ogg']
         if v.lower() not in supported_formats:
-            raise ValueError(f'不支援的音頻格式: {v}，支援的格式: {supported_formats}')
+            raise ValueError(
+                f'不支援的音頻格式: {v}，支援的格式: {supported_formats}'
+            )
         return v.lower()
 
     @validator('quality')
     def validate_quality(cls, v):
         valid_qualities = ['low', 'medium', 'high', 'lossless']
         if v.lower() not in valid_qualities:
-            raise ValueError(f'無效的品質設定: {v}，有效設定: {valid_qualities}')
+            raise ValueError(
+                f'無效的品質設定: {v}，有效設定: {valid_qualities}'
+            )
         return v.lower()
 
 
@@ -64,50 +68,56 @@ class AudioSegmentResult(BaseModel):
 
 class AudioSegmentService:
     """音頻片段提取服務類"""
-    
+
     def __init__(self):
         self.temp_dir = None
         self._check_ffmpeg()
-    
+
     def _check_ffmpeg(self):
         """檢查 FFmpeg 是否可用"""
         try:
-            result = subprocess.run(['ffmpeg', '-version'], 
-                                  capture_output=True, text=True, timeout=10)
+            result = subprocess.run(
+                ['ffmpeg', '-version'],
+                capture_output=True, text=True, timeout=10,
+            )
             if result.returncode != 0:
                 raise RuntimeError("FFmpeg 不可用")
             logger.info("FFmpeg 檢查通過")
-        except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.SubprocessError) as e:
+        except (
+            subprocess.TimeoutExpired,
+            FileNotFoundError,
+            subprocess.SubprocessError,
+        ) as e:
             logger.error(f"FFmpeg 檢查失敗: {str(e)}")
             raise RuntimeError(f"FFmpeg 不可用: {str(e)}")
-    
+
     def _get_audio_info(self, audio_file_path: str) -> Dict[str, Any]:
         """獲取音頻文件資訊"""
         try:
             cmd = [
-                'ffprobe', '-v', 'quiet', '-print_format', 'json', 
+                'ffprobe', '-v', 'quiet', '-print_format', 'json',
                 '-show_format', '-show_streams', audio_file_path
             ]
-            
+
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
                 raise RuntimeError(f"無法獲取音頻資訊: {result.stderr}")
-            
+
             import json
             probe_data = json.loads(result.stdout)
-            
+
             # 尋找音頻流
             audio_stream = None
             for stream in probe_data.get('streams', []):
                 if stream.get('codec_type') == 'audio':
                     audio_stream = stream
                     break
-            
+
             if not audio_stream:
                 raise RuntimeError("找不到音頻流")
-            
+
             format_info = probe_data.get('format', {})
-            
+
             return {
                 'duration': float(format_info.get('duration', 0)),
                 'sample_rate': int(audio_stream.get('sample_rate', 0)),
@@ -116,11 +126,11 @@ class AudioSegmentService:
                 'bit_rate': int(format_info.get('bit_rate', 0)),
                 'format_name': format_info.get('format_name', 'unknown')
             }
-            
+
         except Exception as e:
             logger.error(f"獲取音頻資訊時出錯: {str(e)}")
             raise RuntimeError(f"獲取音頻資訊失敗: {str(e)}")
-    
+
     def _get_quality_settings(self, format: str, quality: str) -> Dict[str, str]:
         """根據格式和品質獲取編碼設定"""
         quality_settings = {
@@ -155,11 +165,14 @@ class AudioSegmentService:
                 'lossless': {'q:a': '10'}
             }
         }
-        
+
         return quality_settings.get(format, {}).get(quality, {})
-    
-    def extract_segment(self, request: AudioSegmentRequest, 
-                       output_dir: Optional[str] = None) -> AudioSegmentResult:
+
+    def extract_segment(
+        self,
+        request: AudioSegmentRequest,
+        output_dir: Optional[str] = None,
+    ) -> AudioSegmentResult:
         """提取音頻片段"""
         try:
             # 驗證輸入文件
@@ -168,16 +181,19 @@ class AudioSegmentService:
                     success=False,
                     error_message=f"音頻文件不存在: {request.audio_file_path}"
                 )
-            
+
             # 獲取音頻資訊
             audio_info = self._get_audio_info(request.audio_file_path)
-            
+
             # 驗證時間範圍
             if request.end_time > audio_info['duration']:
-                logger.warning(f"結束時間 {request.end_time} 超過音頻總時長 {audio_info['duration']}")
+                logger.warning(
+                    f"結束時間 {request.end_time} 超過音頻總時長 "
+                    f"{audio_info['duration']}"
+                )
                 # 調整結束時間到音頻總時長
                 request.end_time = audio_info['duration']
-            
+
             # 設置輸出目錄
             if output_dir is None:
                 if self.temp_dir is None:
@@ -185,12 +201,15 @@ class AudioSegmentService:
                 output_dir = self.temp_dir
             else:
                 Path(output_dir).mkdir(parents=True, exist_ok=True)
-            
+
             # 生成輸出文件名
             duration = request.end_time - request.start_time
-            output_filename = f"segment_{request.start_time:.2f}_{request.end_time:.2f}.{request.output_format}"
+            output_filename = (
+                f"segment_{request.start_time:.2f}_{request.end_time:.2f}"
+                f".{request.output_format}"
+            )
             output_path = os.path.join(output_dir, output_filename)
-            
+
             # 構建 FFmpeg 命令
             cmd = [
                 'ffmpeg', '-y',  # 覆蓋輸出文件
@@ -199,7 +218,7 @@ class AudioSegmentService:
                 '-t', str(duration),             # 持續時間
                 '-vn',                           # 不包含視頻
             ]
-            
+
             # 添加音頻編碼器
             if request.output_format == 'flac':
                 cmd.extend(['-c:a', 'flac'])
@@ -211,28 +230,30 @@ class AudioSegmentService:
                 cmd.extend(['-c:a', 'aac'])
             elif request.output_format == 'ogg':
                 cmd.extend(['-c:a', 'libvorbis'])
-            
+
             # 添加品質設定
-            quality_settings = self._get_quality_settings(request.output_format, request.quality)
+            quality_settings = self._get_quality_settings(
+                request.output_format, request.quality
+            )
             for key, value in quality_settings.items():
                 cmd.extend([f'-{key}', value])
-            
+
             # 添加採樣率設定
             if request.sample_rate:
                 cmd.extend(['-ar', str(request.sample_rate)])
-            
+
             # 添加聲道設定
             if request.channels:
                 cmd.extend(['-ac', str(request.channels)])
-            
+
             # 添加輸出文件
             cmd.append(output_path)
-            
+
             logger.info(f"執行音頻片段提取: {' '.join(cmd)}")
-            
+
             # 執行 FFmpeg 命令
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-            
+
             if result.returncode != 0:
                 error_msg = f"FFmpeg 執行失敗: {result.stderr}"
                 logger.error(error_msg)
@@ -240,20 +261,20 @@ class AudioSegmentService:
                     success=False,
                     error_message=error_msg
                 )
-            
+
             # 驗證輸出文件
             if not os.path.exists(output_path):
                 return AudioSegmentResult(
                     success=False,
                     error_message="輸出文件未生成"
                 )
-            
+
             # 獲取輸出文件資訊
             output_info = self._get_audio_info(output_path)
             file_size = os.path.getsize(output_path)
-            
+
             logger.info(f"音頻片段提取成功: {output_path}")
-            
+
             return AudioSegmentResult(
                 success=True,
                 output_file_path=output_path,
@@ -263,7 +284,7 @@ class AudioSegmentService:
                 sample_rate=output_info['sample_rate'],
                 channels=output_info['channels']
             )
-            
+
         except Exception as e:
             error_msg = f"音頻片段提取時出錯: {str(e)}"
             logger.error(error_msg, exc_info=True)
@@ -271,7 +292,7 @@ class AudioSegmentService:
                 success=False,
                 error_message=error_msg
             )
-    
+
     def cleanup_temp_files(self):
         """清理臨時文件"""
         if self.temp_dir and os.path.exists(self.temp_dir):
@@ -281,7 +302,7 @@ class AudioSegmentService:
                 self.temp_dir = None
             except Exception as e:
                 logger.warning(f"清理臨時目錄時出錯: {str(e)}")
-    
+
     def __del__(self):
         """析構函數，自動清理臨時文件"""
         self.cleanup_temp_files()

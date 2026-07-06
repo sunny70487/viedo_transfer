@@ -24,6 +24,7 @@ def _rewrite_localhost_url(url: str) -> str:
         url,
     )
 
+
 _MAX_RETRIES = 3
 _RETRY_BACKOFF = (2, 5, 10)
 
@@ -137,37 +138,37 @@ def _reconcile_lines(raw_lines: List[str], expected: int) -> Optional[List[str]]
     Returns *None* when reconciliation is impossible.
     """
     # 1) Drop completely empty lines
-    cleaned = [l for l in raw_lines if l.strip()]
+    cleaned = [line for line in raw_lines if line.strip()]
     if len(cleaned) == expected:
-        return [l.strip() for l in cleaned]
+        return [line.strip() for line in cleaned]
 
     # 2) Remove lines that look like headers / notes from the LLM
     filtered = [
-        l for l in cleaned
-        if not l.strip().startswith("【")
-        and not l.strip().startswith("---")
-        and not l.strip().startswith("以上")
-        and not l.strip().startswith("注：")
-        and not l.strip().startswith("備註")
+        line for line in cleaned
+        if not line.strip().startswith("【")
+        and not line.strip().startswith("---")
+        and not line.strip().startswith("以上")
+        and not line.strip().startswith("注：")
+        and not line.strip().startswith("備註")
     ]
     if len(filtered) == expected:
-        return [l.strip() for l in filtered]
+        return [line.strip() for line in filtered]
 
     # 3) Strip leading line numbers / bracketed numbers the LLM may have added
     #    e.g. "1. ", "1: ", "1、", "[1] ", "(1) "
     import re
     stripped_nums = []
-    for l in cleaned:
-        m = re.match(r"^(?:\[?\d+\]?[\.\:、\)\s])\s*", l)
-        stripped_nums.append(l[m.end():] if m else l)
+    for line in cleaned:
+        m = re.match(r"^(?:\[?\d+\]?[\.\:、\)\s])\s*", line)
+        stripped_nums.append(line[m.end():] if m else line)
     # Re-filter empty after stripping
-    stripped_nums = [l for l in stripped_nums if l.strip()]
+    stripped_nums = [line for line in stripped_nums if line.strip()]
     if len(stripped_nums) == expected:
-        return [l.strip() for l in stripped_nums]
+        return [line.strip() for line in stripped_nums]
 
     # 4) If only 1–2 extra lines, take the first N lines
     if len(cleaned) > expected and (len(cleaned) - expected) <= 3:
-        return [l.strip() for l in cleaned[:expected]]
+        return [line.strip() for line in cleaned[:expected]]
 
     return None
 
@@ -206,7 +207,7 @@ def _call_llm(
 
             # Fast path: exact match
             if len(result_lines) == expected:
-                return [l.strip() for l in result_lines]
+                return [line.strip() for line in result_lines]
 
             # Slow path: try to reconcile
             reconciled = _reconcile_lines(result_lines, expected)
@@ -225,7 +226,7 @@ def _call_llm(
                     "using partial results where possible",
                     len(result_lines), expected,
                 )
-                cleaned = [l for l in result_lines if l.strip()]
+                cleaned = [line for line in result_lines if line.strip()]
                 result = list(lines)
                 for i in range(min(len(cleaned), expected)):
                     result[i] = cleaned[i].strip()

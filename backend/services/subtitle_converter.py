@@ -123,9 +123,10 @@ class SubtitleConverter:
         # 添加元資料註釋（可選）
         if options.get("include_metadata", True):
             metadata = subtitle_collection.metadata
+            _created_iso = datetime.fromtimestamp(metadata.created_at).isoformat()
             lines.extend(
                 [
-                    f"NOTE Created: {datetime.fromtimestamp(metadata.created_at).isoformat()}",
+                    f"NOTE Created: {_created_iso}",
                     f"NOTE Language: {metadata.language}",
                     f"NOTE Total Duration: {metadata.total_duration:.2f}s",
                     "",
@@ -237,23 +238,37 @@ class SubtitleConverter:
         self, subtitle_collection: SubtitleCollection, **options
     ) -> str:
         """轉換為 ASS (Advanced SubStation Alpha) 格式"""
+        _ass_style_format = (
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding"
+        )
+        _ass_style_default = (
+            "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,"
+            "&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1"
+        )
+        _ass_event_format = (
+            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, "
+            "MarginV, Effect, Text"
+        )
         lines = [
             "[Script Info]",
             "Title: Subtitle Export",
-            f"ScriptType: v4.00+",
-            f"Collisions: Normal",
-            f"PlayDepth: 0",
-            f"Timer: 100.0000",
-            f"Video Aspect Ratio: 0",
-            f"WrapStyle: 0",
-            f"ScaledBorderAndShadow: no",
+            "ScriptType: v4.00+",
+            "Collisions: Normal",
+            "PlayDepth: 0",
+            "Timer: 100.0000",
+            "Video Aspect Ratio: 0",
+            "WrapStyle: 0",
+            "ScaledBorderAndShadow: no",
             "",
             "[V4+ Styles]",
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-            "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1",
+            _ass_style_format,
+            _ass_style_default,
             "",
             "[Events]",
-            "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+            _ass_event_format,
         ]
 
         for subtitle in subtitle_collection.subtitles:
@@ -261,7 +276,9 @@ class SubtitleConverter:
             end_time = self._format_ass_time(subtitle.end_time)
             text = subtitle.text.replace("\n", "\\N")  # ASS 換行符
 
-            lines.append(f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{text}")
+            lines.append(
+                f"Dialogue: 0,{start_time},{end_time},Default,,0,0,0,,{text}"
+            )
 
         return "\n".join(lines)
 
@@ -277,11 +294,19 @@ class SubtitleConverter:
             "PlayDepth: 0",
             "",
             "[V4 Styles]",
-            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, TertiaryColour, BackColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, AlphaLevel, Encoding",
+            (
+                "Format: Name, Fontname, Fontsize, PrimaryColour, "
+                "SecondaryColour, TertiaryColour, BackColour, Bold, Italic, "
+                "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, "
+                "MarginV, AlphaLevel, Encoding"
+            ),
             "Style: Default,Arial,20,16777215,255,0,0,0,0,1,2,0,2,10,10,10,0,1",
             "",
             "[Events]",
-            "Format: Marked, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+            (
+                "Format: Marked, Start, End, Style, Name, MarginL, MarginR, "
+                "MarginV, Effect, Text"
+            ),
         ]
 
         for subtitle in subtitle_collection.subtitles:

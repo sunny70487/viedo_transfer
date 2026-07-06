@@ -7,7 +7,7 @@ from backend.services.progress_policy import (
 
 def test_next_progress_state_advances_toward_target_progress():
     progress, message = next_progress_state(
-        current_progress=30.0,
+        start_progress=30.0,
         target_progress=95.0,
         total_steps=13,
         step=0,
@@ -25,20 +25,20 @@ def test_split_progress_message_reports_segment_counts():
 
 def test_next_progress_state_uses_split_mode_message():
     progress, message = next_progress_state(
-        current_progress=30.0,
+        start_progress=30.0,
         target_progress=95.0,
         total_steps=10,
         step=1,
         is_split_mode=True,
     )
 
-    assert progress == 36.5
+    assert progress == 43.0
     assert message == "正在處理分段 2/10 (20.0%)"
 
 
 def test_next_progress_state_only_rotates_message_every_third_step():
     _, message = next_progress_state(
-        current_progress=30.0,
+        start_progress=30.0,
         target_progress=95.0,
         total_steps=10,
         step=1,

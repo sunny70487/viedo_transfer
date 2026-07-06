@@ -99,7 +99,11 @@ async def list_folders():
     """List all folders with task counts."""
     try:
         with SessionLocal() as session:
-            folders = session.query(FolderRecord).order_by(FolderRecord.sort_order.asc()).all()
+            folders = (
+                session.query(FolderRecord)
+                .order_by(FolderRecord.sort_order.asc())
+                .all()
+            )
             result = []
             for f in folders:
                 task_count = (
@@ -337,7 +341,10 @@ async def move_tasks_to_folder(folder_id: str, req: MoveTasksRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Failed to move tasks to folder %s: %s", folder_id, e, exc_info=True)
+        logger.error(
+            "Failed to move tasks to folder %s: %s",
+            folder_id, e, exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -361,7 +368,10 @@ async def remove_tasks_from_folder(folder_id: str, req: MoveTasksRequest):
 
         return {"message": f"已從資料夾移除 {len(req.task_ids)} 個任務"}
     except Exception as e:
-        logger.error("Failed to remove tasks from folder %s: %s", folder_id, e, exc_info=True)
+        logger.error(
+            "Failed to remove tasks from folder %s: %s",
+            folder_id, e, exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -388,7 +398,10 @@ async def reorder_tasks_in_folder(folder_id: str, req: ReorderTasksRequest):
 
         return {"message": "任務排序已更新"}
     except Exception as e:
-        logger.error("Failed to reorder tasks in folder %s: %s", folder_id, e, exc_info=True)
+        logger.error(
+            "Failed to reorder tasks in folder %s: %s",
+            folder_id, e, exc_info=True,
+        )
         raise HTTPException(status_code=500, detail=str(e))
 
 

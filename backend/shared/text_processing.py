@@ -131,7 +131,10 @@ def _join_words_text(words: list) -> str:
 
     if avg_len <= 1.5 and has_timestamps:
         chars = [w.get("word", "") for w in words if w.get("word")]
-        timestamps = [[w["start"] * 1000, w["end"] * 1000] for w in words if w.get("word")]
+        timestamps = [
+            [w["start"] * 1000, w["end"] * 1000]
+            for w in words if w.get("word")
+        ]
         return rebuild_segment_text_from_timestamps(chars, timestamps)
 
     parts = []

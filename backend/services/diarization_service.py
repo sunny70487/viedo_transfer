@@ -123,7 +123,8 @@ def _ensure_wav(audio_path: str) -> str:
     except subprocess.CalledProcessError as e:
         os.unlink(tmp_wav.name)
         raise RuntimeError(
-            f"ffmpeg conversion failed for diarization: {e.stderr.decode(errors='replace')}"
+            "ffmpeg conversion failed for diarization: "
+            f"{e.stderr.decode(errors='replace')}"
         ) from e
 
     return tmp_wav.name

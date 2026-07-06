@@ -929,7 +929,9 @@ async def enhance_subtitles_endpoint(req: EnhanceRequest):
     lines = [seg["text"] for seg in segments]
 
     is_translate = req.mode == "translate" and req.target_language
-    translate_prompt = build_translate_prompt(req.target_language) if is_translate else None
+    translate_prompt = (
+        build_translate_prompt(req.target_language) if is_translate else None
+    )
     original_lines = list(lines) if (is_translate and req.bilingual) else None
 
     if is_translate:
@@ -946,25 +948,43 @@ async def enhance_subtitles_endpoint(req: EnhanceRequest):
         try:
             from openai import OpenAI
         except ImportError:
-            yield f"data: {json.dumps({'type': 'error', 'message': 'openai 套件未安裝'})}\n\n"
+            _err = {'type': 'error', 'message': 'openai 套件未安裝'}
+            yield f"data: {json.dumps(_err)}\n\n"
             return
 
         merged_count = len(req.subtitles) - len(segments)
         if merged_count > 0:
-            yield f"data: {json.dumps({'type': 'info', 'message': f'已合併 {merged_count} 個過短段落'})}\n\n"
+            _msg = {
+                'type': 'info',
+                'message': f'已合併 {merged_count} 個過短段落',
+            }
+            yield f"data: {json.dumps(_msg)}\n\n"
 
         if is_translate:
-            yield f"data: {json.dumps({'type': 'info', 'message': f'正在翻譯為{req.target_language}...'})}\n\n"
+            _msg = {
+                'type': 'info',
+                'message': f'正在翻譯為{req.target_language}...',
+            }
+            yield f"data: {json.dumps(_msg)}\n\n"
 
         from backend.shared.llm_postprocess import _rewrite_localhost_url
-        client = OpenAI(api_key=req.api_key, base_url=_rewrite_localhost_url(req.base_url.rstrip("/")))
+        client = OpenAI(
+            api_key=req.api_key,
+            base_url=_rewrite_localhost_url(req.base_url.rstrip("/")),
+        )
         corrected = list(lines)
 
         for chunk_idx, indices in enumerate(chunks):
             chunk_lines_batch = [lines[i] for i in indices]
 
             progress_pct = int((chunk_idx / total_chunks) * 100)
-            yield f"data: {json.dumps({'type': 'progress', 'batch': chunk_idx + 1, 'total': total_chunks, 'percent': progress_pct})}\n\n"
+            _prog = {
+                'type': 'progress',
+                'batch': chunk_idx + 1,
+                'total': total_chunks,
+                'percent': progress_pct,
+            }
+            yield f"data: {json.dumps(_prog)}\n\n"
 
             if chunk_idx > 0:
                 import time as _time
@@ -994,7 +1014,13 @@ async def enhance_subtitles_endpoint(req: EnhanceRequest):
                 yield f"data: {json.dumps({'type': 'error', 'message': msg})}\n\n"
                 return
 
-        yield f"data: {json.dumps({'type': 'progress', 'batch': total_chunks, 'total': total_chunks, 'percent': 100})}\n\n"
+        _final = {
+            'type': 'progress',
+            'batch': total_chunks,
+            'total': total_chunks,
+            'percent': 100,
+        }
+        yield f"data: {json.dumps(_final)}\n\n"
 
         if original_lines:
             for i in range(len(corrected)):
@@ -1014,7 +1040,12 @@ async def enhance_subtitles_endpoint(req: EnhanceRequest):
             post_llm = resplit_long_segments(post_llm)
 
         result_subs = [
-            {"index": s["id"], "start_time": s["start"], "end_time": s["end"], "text": s["text"]}
+            {
+                "index": s["id"],
+                "start_time": s["start"],
+                "end_time": s["end"],
+                "text": s["text"],
+            }
             for s in post_llm
         ]
 

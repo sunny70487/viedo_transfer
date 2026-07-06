@@ -38,6 +38,15 @@ def build_yt_dlp_options(
         "windowsfilenames": True,
         "restrictfilenames": True,
         "keepvideo": True,
+        "continuedl": True,
+        "retries": 10,
+        "fragment_retries": 10,
+        "file_access_retries": 5,
+        "retry_sleep_functions": {
+            "http": lambda n: min(2 ** n, 30),
+            "fragment": lambda n: min(2 ** n, 30),
+        },
+        "http_chunk_size": 10485760,
     }
 
     if download_format == "audio":
@@ -165,6 +174,7 @@ def download_from_url(
                         print(f"使用資料夾中最新的檔案：{downloaded_file}")
         else:
             print(f"下載時出錯: {exc}")
+            raise
 
     if download_format == "audio" and downloaded_file:
         downloaded_file = re.sub(r"\.[^.]+$", ".flac", downloaded_file)
