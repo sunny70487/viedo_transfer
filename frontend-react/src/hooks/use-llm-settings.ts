@@ -1,5 +1,3 @@
-import { useCallback } from 'react'
-
 const LLM_STORAGE_KEY = 'whisper_llm_settings'
 
 export interface LlmSettings {
@@ -43,10 +41,4 @@ export function saveLlmSettings(s: Partial<LlmSettings>) {
       llm_content_hint: merged.content_hint,
     }))
   } catch { /* ignore */ }
-}
-
-export function useLlmSettings() {
-  const load = useCallback(() => loadLlmSettings(), [])
-  const save = useCallback((s: Partial<LlmSettings>) => saveLlmSettings(s), [])
-  return { load, save }
 }

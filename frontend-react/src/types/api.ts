@@ -1,4 +1,4 @@
-export interface Word {
+interface Word {
   start: number
   end: number
   word: string
@@ -15,7 +15,7 @@ export interface Subtitle {
   confidence?: number
 }
 
-export interface VideoInfo {
+interface VideoInfo {
   duration?: number
   format?: string
   resolution?: string
@@ -24,7 +24,7 @@ export interface VideoInfo {
   file_size?: number
 }
 
-export interface SubtitleMetadata {
+interface SubtitleMetadata {
   language?: string
   model_used?: string
   created_at?: number
@@ -41,12 +41,12 @@ export interface SubtitleCollection {
   metadata: SubtitleMetadata
 }
 
-export interface TaskResult {
+interface TaskResult {
   files: Record<string, string>
   output_dir?: string
 }
 
-export interface PartialSegment {
+interface PartialSegment {
   start: number
   end: number
   text: string
@@ -105,7 +105,7 @@ export interface BatchResponse {
   errors?: string[]
 }
 
-export interface GpuDevice {
+interface GpuDevice {
   name: string
   memory_allocated: string
   memory_reserved: string

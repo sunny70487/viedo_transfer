@@ -10,15 +10,6 @@ export function useTasks() {
   })
 }
 
-export function useTask(taskId: string) {
-  return useQuery({
-    queryKey: ['task', taskId],
-    queryFn: () => api.getTask(taskId),
-    enabled: !!taskId,
-    refetchInterval: false,
-  })
-}
-
 export function useDeleteTask() {
   const qc = useQueryClient()
   return useMutation({

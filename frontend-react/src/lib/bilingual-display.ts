@@ -1,5 +1,5 @@
 /** localStorage：雙語字幕是否以「第一行」為主字幕（較大）；false 表示以第二行為主 */
-export const BILINGUAL_PRIMARY_FIRST_LINE_KEY = 'editor-bilingual-primary-is-first-line'
+const BILINGUAL_PRIMARY_FIRST_LINE_KEY = 'editor-bilingual-primary-is-first-line'
 
 export function readBilingualPrimaryIsFirstLine(): boolean {
   try {

@@ -101,19 +101,6 @@ export function useReorderTasks() {
   })
 }
 
-export function useReorderFolders() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (folderIds: string[]) => api.reorderFolders(folderIds),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['folders'] })
-    },
-    onError: (err: Error) => {
-      toast('error', `排序失敗: ${err.message}`)
-    },
-  })
-}
-
 export function useTranscribeFolderUpload() {
   const qc = useQueryClient()
   return useMutation({

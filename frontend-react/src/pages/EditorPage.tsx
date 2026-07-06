@@ -314,6 +314,7 @@ export function EditorPage() {
                         videoRef.current?.seek(t)
                         videoRef.current?.play()
                       }}
+                      onPause={() => videoRef.current?.pause()}
                       currentTime={videoTime}
                     />
                   </div>

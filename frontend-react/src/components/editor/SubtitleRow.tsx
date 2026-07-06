@@ -10,10 +10,11 @@ interface SubtitleRowProps {
   isActive: boolean
   onSelect: () => void
   onSeek: (time: number) => void
+  onPause?: () => void
   currentTime?: number
 }
 
-export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek, currentTime }: Readonly<SubtitleRowProps>) {
+export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek, onPause, currentTime }: Readonly<SubtitleRowProps>) {
   const updateSubtitle = useEditorStore((s) => s.updateSubtitle)
   const splitSubtitle = useEditorStore((s) => s.splitSubtitle)
   const mergeWithNext = useEditorStore((s) => s.mergeWithNext)
@@ -111,7 +112,7 @@ export function SubtitleRow({ subtitle, index, isActive, onSelect, onSeek, curre
         ) : (
           <p
             className="text-sm text-text dark:text-text-dark leading-relaxed"
-            onDoubleClick={() => { setEditText(subtitle.text); setEditing(true) }}
+            onDoubleClick={() => { setEditText(subtitle.text); setEditing(true); onPause?.() }}
           >
             {subtitle.speaker && (
               <span className="font-medium text-primary mr-1">[{subtitle.speaker}]</span>
