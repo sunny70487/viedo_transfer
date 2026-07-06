@@ -55,5 +55,4 @@ Thumbs.db
 /static/
 /templates/
 .cursor/
-docs/
 .pytest_cache/
