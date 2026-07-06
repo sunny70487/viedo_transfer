@@ -15,9 +15,6 @@ load_dotenv()
 
 import json
 import logging
-import platform
-import shutil
-import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -26,23 +23,13 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 import uvicorn
-from fastapi import FastAPI, Form, UploadFile, File, BackgroundTasks
+from fastapi import FastAPI, Form, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from backend.funasr_transcribe import download_from_url, check_gpu
-from backend.models import (
-    Word,
-    Subtitle,
-    SubtitleCollection,
-    RetranscribeRequest,
-    VideoInfo,
-    SubtitleMetadata,
-    RetranscribeTask,
-    SubtitleExportRequest,
-)
+from backend.funasr_transcribe import download_from_url
 from backend.shared.engine_routing import transcribe_audio
 from backend.shared.video_utils import prepare_source_video_for_preview
 from backend.task_persistence import TaskPersistence
@@ -195,7 +182,7 @@ class TranscriptionRequest(BaseModel):
     output_format: str = "srt"
     split_segments: bool = False
     segment_duration: int = 30
-    download_format: str = "audio"
+    download_format: str = "both"
     video_quality: str = "best"
     output_dir: Optional[str] = None
     file_path: Optional[str] = None
@@ -211,7 +198,7 @@ class TranscriptionRequest(BaseModel):
 
 class BatchUrlRequest(BaseModel):
     urls: List[str]
-    download_format: str = "audio"
+    download_format: str = "both"
     video_quality: str = "best"
     model_size: str = "qwen3-asr-1.7b"
     device: str = "auto"
@@ -822,12 +809,21 @@ async def transcribe_folder_upload(
     llm_model: str = Form("gpt-4o-mini"),
     llm_content_hint: Optional[str] = Form(None),
 ):
-    """Upload files from a folder scan, create a folder, and transcribe each file."""
+    """Upload files from a folder scan, recreate its sub-folder tree, and transcribe each file."""
+    import json as _json
     import time as _time
     from backend.database import SessionLocal as _Session, FolderRecord
+    from backend.services.folder_api import resolve_or_create_subfolder
 
     if not files:
         return JSONResponse(status_code=400, content={"error": "至少需要上傳一個檔案"})
+
+    try:
+        rel_paths = _json.loads(relative_paths)
+        if not isinstance(rel_paths, list):
+            rel_paths = []
+    except Exception:
+        rel_paths = []
 
     name = folder_name.strip() or "未命名資料夾"
     now = _time.time()
@@ -852,6 +848,14 @@ async def transcribe_folder_upload(
             for part in _re.split(r'(\d+)', name)
         ]
 
+    def _sub_path_for(orig_idx: int) -> str:
+        rel = rel_paths[orig_idx] if orig_idx < len(rel_paths) else ""
+        if not isinstance(rel, str):
+            return ""
+        parts = rel.replace("\\", "/").split("/")
+        # Drop the leading root folder segment and the trailing filename.
+        return "/".join(parts[1:-1]) if len(parts) > 2 else ""
+
     indexed_files = sorted(
         enumerate(files),
         key=lambda pair: _natural_sort_key(
@@ -859,11 +863,27 @@ async def transcribe_folder_upload(
         ),
     )
 
-    for sort_idx, (_, file) in enumerate(indexed_files):
+    subfolder_cache: Dict[str, str] = {}
+
+    for sort_idx, (orig_idx, file) in enumerate(indexed_files):
         valid, error = validate_upload_filename(file.filename)
         if not valid:
             errors.append(f"{file.filename}: {error}")
             continue
+
+        sub_path = _sub_path_for(orig_idx)
+        target_folder_id = folder_id
+        if sub_path:
+            try:
+                with _Session() as session:
+                    target_folder_id = resolve_or_create_subfolder(
+                        session, root_id=folder_id, sub_path=sub_path,
+                        now=now, cache=subfolder_cache,
+                    )
+                    session.commit()
+            except Exception as e:
+                logger.error("Failed to create sub-folder '%s': %s", sub_path, e)
+                target_folder_id = folder_id
 
         display_name = Path(file.filename).name if file.filename else file.filename
         task_obj = create_task_entry(
@@ -871,7 +891,7 @@ async def transcribe_folder_upload(
             save_task=save_task_to_disk,
             source_name=display_name,
             batch_id=batch_id,
-            folder_id=folder_id,
+            folder_id=target_folder_id,
         )
         task_obj.sort_order = float(sort_idx)
         task_obj.status = "uploading"

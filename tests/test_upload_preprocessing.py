@@ -22,7 +22,7 @@ def test_validate_upload_filename_rejects_unsupported_extension():
     assert "不支援的檔案格式" in error
 
 
-def test_save_uploaded_file_writes_content_to_task_prefixed_path(tmp_path):
+def test_save_uploaded_file_writes_content_to_task_dir_with_original_name(tmp_path):
     file_obj = SimpleNamespace(filename="demo.wav", file=SimpleNamespace(read=None))
 
     class _Buffer:
@@ -44,7 +44,7 @@ def test_save_uploaded_file_writes_content_to_task_prefixed_path(tmp_path):
         upload_file=file_obj,
     )
 
-    assert saved_path == tmp_path / "task-1_demo.wav"
+    assert saved_path == tmp_path / "task-1" / "demo.wav"
     assert saved_path.read_bytes() == b"audio-bytes"
 
 
