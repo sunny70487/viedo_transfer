@@ -13,6 +13,7 @@ Daily commands:
 | Goal | Windows | macOS / Linux |
 |---|---|---|
 | Start dev servers (backend :5000 + frontend :5173) | `.\scripts\dev-setup.ps1 dev` | `make dev` |
+| Docker app port | host `5001` → container `5000` | `docker compose up -d` → http://localhost:5001 |
 | Run tests | `.\scripts\dev-setup.ps1 test` | `make test` |
 | Run linters | `.\scripts\dev-setup.ps1 lint` | `make lint` |
 | Local CI simulation (lint + test) | `.\scripts\dev-setup.ps1 check` | `make check` |
@@ -52,7 +53,7 @@ Persistence: SQLite in dev (`tasks.db`), PostgreSQL in Docker (via `DATABASE_URL
 |---|---|
 | `backend/app.py` | FastAPI app factory, route wiring, `tasks` registry, `_transcription_executor`, transcription worker |
 | `backend/database.py` | SQLAlchemy engine, `TaskRecord`/`FolderRecord` ORM, incremental migrations |
-| `backend/models.py` | Pydantic domain models (Subtitle, SubtitleCollection, RetranscribeRequest, …) |
+| `backend/models.py` | Pydantic domain models (Subtitle, SubtitleCollection, SubtitleSearchRequest, …) |
 | `backend/task_persistence.py` | `TaskPersistence` class: save/load/delete/rebuild tasks via SQL |
 | `backend/qwen3_asr_transcribe.py` | Qwen3-ASR engine implementation |
 | `backend/funasr_transcribe.py` | FunASR / SenseVoice / Whisper engine implementation |
@@ -97,7 +98,7 @@ Persistence: SQLite in dev (`tasks.db`), PostgreSQL in Docker (via `DATABASE_URL
 | Python function | `snake_case`, verb-first | `build_status_callback`, `finalize_task_success` |
 | Python private helper | `_leading_underscore` | `_detect_max_workers`, `_apply_llm_enhancement` |
 | Python class | `PascalCase` | `TaskPersistence`, `SubtitleService` |
-| Pydantic request/response | `<Entity><Role>` | `TranscriptionRequest`, `SubtitleExportRequest` |
+| Pydantic request/response | `<Entity><Role>` | `TranscriptionRequest`, `SubtitleSearchRequest` |
 | Python constant / module singleton | `UPPER_SNAKE_CASE` or `_leading_underscore` | `FUNASR_MODEL_NAMES`, `_transcription_executor` |
 | TS React component file | `PascalCase.tsx` | `SubtitleRow.tsx`, `VideoPlayer.tsx` |
 | TS non-component file | `kebab-case.ts` | `editor-store.ts`, `use-task-stream.ts` |

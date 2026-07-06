@@ -107,12 +107,11 @@ Load path prefers `<id>_updated.json` over the original engine output. Don't byp
 |---|---|
 | Any REST call | `frontend-react/src/api/client.ts:api.<method>(...)` |
 | Task SSE stream | `frontend-react/src/hooks/use-task-stream.ts:useTaskStream(taskId, enabled?)` |
-| Query all tasks | `frontend-react/src/hooks/use-tasks.ts` |
-| Query a single task | `frontend-react/src/hooks/use-task.ts` |
+| Query all tasks | `frontend-react/src/hooks/use-tasks.ts:useTasks` |
 | Load subtitles | `frontend-react/src/hooks/use-subtitles.ts` |
 | List folders | `frontend-react/src/hooks/use-folders.ts` |
 | GPU info | `frontend-react/src/hooks/use-gpu-info.ts` |
-| LLM settings persistence | `frontend-react/src/hooks/use-llm-settings.ts` |
+| LLM settings persistence | `frontend-react/src/hooks/use-llm-settings.ts:loadLlmSettings` / `saveLlmSettings` |
 | Toast notifications | `frontend-react/src/hooks/use-task-notifications.ts` + `stores/toast-store.ts` |
 
 ## Decision Guides

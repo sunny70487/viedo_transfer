@@ -27,7 +27,7 @@ Additional manual checks:
 | Python function | verb-first `snake_case` | `resolve_output_directory(*, request, task_id, output_root)` |
 | Private helper | leading underscore | `_detect_max_workers()` in `backend/app.py` |
 | Module singleton | leading underscore | `_transcription_executor` in `backend/app.py` |
-| Pydantic class | `<Domain><Role>` | `RetranscribeRequest`, `SubtitleExportRequest` in `backend/models.py` |
+| Pydantic class | `<Domain><Role>` | `RetranscribeRequest`, `SubtitleSearchRequest` in `backend/models.py` |
 | Service class | `PascalCase` | `RetranscribeService` in `backend/services/retranscribe_service.py` |
 | Constant set | `UPPER_SNAKE_CASE` | `FUNASR_MODEL_NAMES` in `backend/shared/engine_routing.py` |
 | TS component file | `PascalCase.tsx` | `frontend-react/src/components/editor/SubtitleRow.tsx` |

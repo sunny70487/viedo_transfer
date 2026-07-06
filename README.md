@@ -25,25 +25,29 @@
 ```
 whisper_transfer/
 ├── backend/
-│   ├── app.py                      # FastAPI 主應用
-│   ├── qwen3_asr_transcribe.py     # Qwen3-ASR 轉錄引擎（主要）
-│   ├── funasr_transcribe.py        # FunASR 轉錄引擎（備用 / 工具函數）
-│   ├── faster_whisper_transcribe.py # Faster Whisper 轉錄引擎（備用）
-│   ├── models.py                   # Pydantic 資料模型
-│   ├── task_persistence.py         # 任務持久化
-│   ├── requirements.txt            # Python 依賴
+│   ├── app.py                        # FastAPI 主應用
+│   ├── qwen3_asr_transcribe.py       # Qwen3-ASR 轉錄引擎（主要）
+│   ├── funasr_transcribe.py          # FunASR 轉錄引擎（備用）
+│   ├── faster_whisper_transcribe.py  # Faster Whisper 轉錄引擎（備用）
+│   ├── models.py                     # Pydantic 資料模型
+│   ├── database.py                   # SQLAlchemy ORM + 遷移
+│   ├── task_persistence.py           # 任務持久化（SQL）
 │   └── services/
 │       ├── audio_segment_service.py  # 音頻分割服務
 │       ├── retranscribe_service.py   # 重新轉錄服務
-│       ├── subtitle_api.py           # 字幕 API
-│       └── subtitle_converter.py     # 字幕格式轉換
-├── frontend/
-│   ├── templates/
-│   │   ├── index.html              # 主頁面
-│   │   └── subtitle_editor.html    # 字幕編輯器
-│   └── static/
-│       ├── css/                    # 樣式（含主題）
-│       └── js/                     # 前端邏輯
+│       ├── subtitle_api.py           # 字幕 CRUD / 增強 / 燒錄
+│       ├── subtitle_converter.py     # 字幕格式轉換
+│       ├── folder_api.py             # 資料夾管理
+│       ├── task_api.py               # 任務狀態 / SSE
+│       └── system_api.py             # GPU 資訊 / 目錄列表
+├── frontend-react/                   # React 19 + TypeScript + Vite
+│   └── src/
+│       ├── api/client.ts             # REST / SSE 呼叫
+│       ├── hooks/                    # TanStack Query hooks
+│       ├── pages/                    # HomePage, EditorPage
+│       ├── components/               # UI 元件
+│       └── types/api.ts              # TypeScript 型別定義
+├── tests/                            # Pytest 測試
 ├── docker-compose.yml
 ├── Dockerfile
 └── README.md
@@ -53,7 +57,7 @@ whisper_transfer/
 
 ### 系統需求
 
-- Python 3.11 或更高版本
+- Python 3.12 或更高版本
 - FFmpeg（用於音頻提取和影片轉換）
 - 推薦使用 CUDA 相容的 NVIDIA GPU 以獲得更好的效能
 
@@ -62,6 +66,12 @@ whisper_transfer/
 ```bash
 git clone <repository-url>
 cd whisper_transfer
+python -m venv .venv
+# Windows
+.\.venv\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+
 pip install -r backend/requirements.txt
 ```
 
@@ -88,15 +98,19 @@ python -m flake8 tests backend/shared backend/services backend/models.py backend
 需要 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) 以啟用 GPU 支援。
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 Docker 配置說明：
 - 基於 `nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04`
-- 自動掛載 `outputs/`、`uploads/`、`tasks_data.json` 至容器，資料不遺失
+- 主機 port **5001** → 容器 port 5000（`http://localhost:5001`）
+- 自動掛載 `outputs/`、`uploads/` 至容器，資料不遺失
 - 模型快取使用 Docker Volume（`whisper-model-cache`），避免每次重啟重新下載
+- PostgreSQL 資料庫另起獨立容器，資料持久化於 `whisper-postgres-data` Volume
 - 可掛載本地微調模型目錄（如 `faster-whisper-large-v3-zh-TW/`）
 - 內建健康檢查（每 30 秒）
+
+> **Windows 注意**：若遇到 `ports are not available` 錯誤，表示目標 port 落在 Hyper-V 保留範圍。請直接修改 `docker-compose.yml` 中的主機 port（如改成 `5001:5000`）。
 
 ## 使用方法
 
@@ -107,12 +121,14 @@ Docker 配置說明：
 python -m uvicorn backend.app:app --host 0.0.0.0 --port 5000
 
 # 或使用 Docker
-docker-compose up -d
+docker compose up -d
 ```
 
-應用將在 http://localhost:5000 啟動。
+應用將在以下位置啟動：
+- 本地開發：http://localhost:5000
+- Docker：http://localhost:5001
 
-1. 打開瀏覽器訪問 http://localhost:5000
+1. 打開瀏覽器訪問對應網址
 2. 選擇從 URL 轉錄或上傳音頻/影片檔案
 3. 設定轉錄選項（模型、語言、輸出格式等）
 4. 提交任務
@@ -135,7 +151,7 @@ docker-compose up -d
 - **語言**：指定音頻語言，留空則自動檢測
 - **任務**：轉錄（保持原始語言）或翻譯成英文
 - **輸出格式**：txt, srt, vtt, json, ass, ssa
-- **下載格式**：僅音頻 / 含影片
+- **下載格式**：僅音頻 / 音頻+影片
 
 ### 進階選項
 
@@ -163,7 +179,7 @@ docker-compose up -d
 - GPU 轉錄速度遠快於 CPU
 - 轉錄長影片時，建議啟用分割處理選項
 - 非 MP4 格式的影片會自動轉換為 MP4 以確保瀏覽器播放相容性
-- 任務資料會自動持久化至 `tasks_data.json`，重啟後自動恢復
+- 任務資料持久化至 SQLite（本地開發 `tasks.db`）或 PostgreSQL（Docker），重啟後自動恢復
 
 ## 授權
 

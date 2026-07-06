@@ -112,7 +112,7 @@ while True:
 - **`RetranscribeService` is not persisted.** Restarts drop all retranscription state.
 - **`Task.source_file_path` is NOT in the DB schema.** `TaskRecord` lacks this column; the value survives only in memory.
 - **Duplicate video-extension lists.** `media_config.py` is canonical, but `subtitle_api.py` and `download_api.py` each inline their own. Keep them in sync when extending.
-- **Vite dev proxy expects port 5000.** `backend/app.py:__main__` defaults to 5001 for local runs; Docker uses 5000. Adjust accordingly.
+- **Vite dev proxy expects port 5000.** Run backend via `uvicorn backend.app:app --port 5000 --reload` to match the proxy. Docker maps host **5001** → container 5000 (see `docker-compose.yml`). Windows Hyper-V may reserve the host port; change the host-side mapping if you get a bind error.
 - **SSE generator re-fetches `tasks` each iteration.** Re-assignment inside the loop intentionally guards against registry swap, but the same check-then-use pattern is safe only because there is no `await` between `in` check and `tasks[task_id]` access.
 
 ## Key Globals

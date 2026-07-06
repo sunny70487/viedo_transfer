@@ -98,7 +98,7 @@ Not persisted (in-memory only): `source_file_path`, `partial_segments`. Remember
 | React Query defaults | `frontend-react/src/App.tsx` | `{ retry: 1, refetchOnWindowFocus: false }` |
 | TypeScript strict mode | `frontend-react/tsconfig.app.json` | `strict: true`, `noUnusedLocals`, `noUnusedParameters` |
 
-Note: `backend/app.py:__main__` uses port 5001 for direct invocation, but Docker and Vite assume 5000. Run via `uvicorn backend.app:app --port 5000 --reload` for local dev that matches the Vite proxy.
+Note: Local dev runs on port **5000** (to match the Vite proxy at `vite.config.ts`). Docker maps host **5001** → container 5000, so the app is accessible at `http://localhost:5001` when using Docker. If Docker reports a bind error on Windows, the host port falls in a Hyper-V reserved range — change the left-side of the ports mapping in `docker-compose.yml` to any free port.
 
 ## CI Configuration
 

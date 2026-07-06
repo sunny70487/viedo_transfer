@@ -86,7 +86,7 @@ All successful transcription POSTs return `{"task_id": "<uuid>"}` (or `{"batch_i
 Primary Pydantic models live in `backend/models.py` and the top of `backend/app.py`:
 
 - `TranscriptionRequest`, `BatchUrlRequest`, `LlmModelsRequest` — `backend/app.py`
-- `Subtitle`, `Word`, `SubtitleCollection`, `SubtitleMetadata`, `VideoInfo`, `RetranscribeRequest`, `RetranscribeTask`, `SubtitleExportRequest`, `SubtitleSearchRequest`, `SubtitleSearchResult` — `backend/models.py`
+- `Subtitle`, `SubtitleCollection`, `SubtitleSearchRequest`, `SubtitleSearchResult` — `backend/models.py`
 
 Canonical TypeScript mirrors live in `frontend-react/src/types/api.ts`. Keep both sides in sync when changing shapes.
 
