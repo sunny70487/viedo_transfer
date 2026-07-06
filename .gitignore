@@ -35,6 +35,9 @@ faster-whisper-large-v3-zh-TW/
 # Secrets
 .env
 
+# Local session state (agent progress tracker — not committed)
+PROGRESS.md
+
 # OS
 .DS_Store
 Thumbs.db

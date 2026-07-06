@@ -30,7 +30,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "5050:5000"
+      - "5001:5000"
     volumes:
       # 轉錄輸出持久化
       - ./outputs:/app/outputs
