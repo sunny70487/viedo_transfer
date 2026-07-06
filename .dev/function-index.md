@@ -1,140 +1,137 @@
-# Function Index — by Developer Intent
+# Function Index (by Intent)
 
-## I need to create/manage transcription tasks
+Search by "I need to …" before writing new code. Locations use `module:function` notation; files are relative to repo root.
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `create_task_entry` | `(*, tasks, save_task, source_name, batch_id=None)` | Create a new task in the registry | `services/transcription_launcher.py` |
-| `submit_transcription` | `(*, executor, target, task_id, file_path, request) → Future` | Submit task to thread pool | `services/transcription_launcher.py` |
-| `process_transcription` | `(task_id, file_path, request)` | Main worker — downloads, transcribes, saves | `app.py` |
-| `save_task_to_disk` | `(task: Task)` | Persist task to database | `app.py` |
+## I need to create or submit a transcription task
 
-## I need to run ASR transcription
+| Intent | Use | Why |
+|---|---|---|
+| Create a new task row in the in-memory registry + DB | `backend/services/transcription_launcher.py:create_task_entry(*, tasks, save_task, source_name, batch_id=None, folder_id=None, task_cls=None)` | Handles UUID, persistence, timestamps |
+| Submit a prepared job to the thread pool | `backend/services/transcription_launcher.py:submit_transcription(*, executor, target, task_id, file_path, request)` | Single entry-point for scheduling work |
+| Run the actual transcription call | `backend/shared/engine_routing.py:transcribe_audio(**kwargs)` | Picks Qwen3 / FunASR based on `model_size` |
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `transcribe_audio` | `(**kwargs) → Dict[str, str]` | Unified entry — routes to correct engine | `shared/engine_routing.py` |
-| `_qwen3_transcribe` | `(**kwargs)` | Qwen3-ASR engine | `qwen3_asr_transcribe.py` |
-| `_funasr_transcribe` | `(**kwargs)` | FunASR engine | `funasr_transcribe.py` |
+Pick `create_task_entry` over hand-rolling a `Task(...)` — it ensures the DB row exists before any worker runs.
 
-**Decision guide**: Always call `engine_routing.transcribe_audio()` — it auto-routes based on `model_size`. Direct engine calls only for debugging.
+## I need to report progress / finalize / fail a task
 
-## I need to handle task state transitions
+| Intent | Use |
+|---|---|
+| Build a status callback (used by engines) | `backend/services/transcription_progress.py:build_status_callback(*, task, save_task)` |
+| Estimate total steps for split transcription | `backend/services/transcription_progress.py:estimate_total_steps(...)` |
+| Mark a task as successful | `backend/services/transcription_orchestrator.py:finalize_task_success(*, task, transcription_results, output_directory, now)` |
+| Mark a task as failed | `backend/services/transcription_progress.py:finalize_task_failure(*, task, error, now)` |
+| Compute next progress percent + message | `backend/services/progress_policy.py:next_progress_state(...)` |
+| Resolve where to place output files | `backend/services/transcription_orchestrator.py:resolve_output_directory(*, request, task_id, output_root)` |
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `finalize_task_success` | `(*, task, transcription_results, output_directory, now)` | Mark task completed with results | `services/transcription_orchestrator.py` |
-| `finalize_task_failure` | `(*, task, error, now)` | Mark task as failed | `services/transcription_progress.py` |
-| `build_status_callback` | `(*, task, save_task) → Callable` | Create progress callback for engines | `services/transcription_progress.py` |
-| `resolve_output_directory` | `(*, request, task_id, output_root) → str` | Determine output path | `services/transcription_orchestrator.py` |
+Always call `save_task_to_disk(task)` after mutating a `Task` outside the status callback — the callback only persists on message/progress change.
 
-## I need to work with task persistence (database)
+## I need to persist / load / delete tasks
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `TaskPersistence.save_task` | `(task_id: str, task_data: dict) → bool` | Upsert task to DB | `task_persistence.py` |
-| `TaskPersistence.load_all_tasks` | `() → Dict[str, Any]` | Load all tasks from DB | `task_persistence.py` |
-| `TaskPersistence.delete_task` | `(task_id: str) → bool` | Delete task from DB | `task_persistence.py` |
-| `TaskPersistence.initialize_tasks` | `() → Dict[str, Any]` | Init DB + load/migrate/rebuild | `task_persistence.py` |
-| `TaskPersistence.scan_and_rebuild_tasks` | `() → Dict[str, Any]` | Rebuild from filesystem | `task_persistence.py` |
-| `init_db` | `()` | Create tables if needed | `database.py` |
+| Intent | Use |
+|---|---|
+| Save task snapshot | `backend/task_persistence.py:TaskPersistence.save_task(task_id, task_data)` |
+| Load all tasks at startup | `backend/task_persistence.py:TaskPersistence.load_all_tasks()` |
+| Full startup init (DB create → load → migrate → rebuild) | `backend/task_persistence.py:TaskPersistence.initialize_tasks()` |
+| Delete task row | `backend/task_persistence.py:TaskPersistence.delete_task(task_id)` |
+| Rebuild tasks from `outputs/` if DB empty | `backend/task_persistence.py:TaskPersistence.scan_and_rebuild_tasks()` |
+| Migrate legacy `tasks_data.json` | `backend/task_persistence.py:TaskPersistence._migrate_from_json()` (internal) |
 
-## I need to handle file uploads
+## I need to read / write subtitle data
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `validate_upload_filename` | `(filename: str) → (bool, Optional[str])` | Check extension validity | `services/upload_preprocessing.py` |
-| `save_uploaded_file` | `(*, upload_dir, task_id, upload_file) → Path` | Save upload to disk | `services/upload_preprocessing.py` |
-| `build_transcription_request` | `(*, request_cls, **kwargs) → TranscriptionRequest` | Construct request from form data | `services/upload_preprocessing.py` |
+| Intent | Use |
+|---|---|
+| Load subtitles for a completed task | `backend/services/subtitle_api.py:SubtitleService.load_subtitle_data(task_id, tasks)` |
+| Save subtitle collection to `<id>_updated.json` | `backend/services/subtitle_api.py:SubtitleService.save_subtitle_data(...)` |
+| Write SRT/VTT/TXT/JSON outputs | `backend/shared/transcription_pipeline.py:write_output_files(...)` |
+| Build a single SRT/VTT entry | `backend/shared/transcription_pipeline.py:build_srt_entry(...)` / `build_vtt_entry(...)` |
+| Format a timestamp | `backend/shared/transcribe_helpers.py:format_timestamp(seconds, format="srt"|"vtt")` |
 
-## I need to handle URL downloads
+Load path prefers `<id>_updated.json` over the original engine output. Don't bypass this — it preserves edits.
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `prepare_url_input` | `(*, task, request, output_directory, download) → str` | Download from URL, update task progress | `services/url_preprocessing.py` |
-| `download_from_url` | `(url, output_dir, download_format, verbose, video_quality) → (str, str)` | yt-dlp download wrapper | `funasr_transcribe.py` |
+## I need to validate / save an uploaded file
 
-## I need to work with subtitles (load/save/edit)
+| Intent | Use |
+|---|---|
+| Validate filename extension | `backend/services/upload_preprocessing.py:validate_upload_filename(filename)` |
+| Persist uploaded file to `uploads/` | `backend/services/upload_preprocessing.py:save_uploaded_file(*, upload_dir, task_id, upload_file)` |
+| Build a `TranscriptionRequest` from Form fields | `backend/services/upload_preprocessing.py:build_transcription_request(*, request_cls, **kwargs)` |
+| Decide if a path is a supported media file | `backend/shared/media_config.py:is_supported_media_file(path)` |
+| Get MIME type for a file path | `backend/shared/media_config.py:get_media_type(path)` |
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `SubtitleService.load_subtitle_data` | `(task_id, tasks) → SubtitleCollection` | Load from JSON → Pydantic models | `services/subtitle_api.py` |
-| `SubtitleService.save_subtitle_data` | `(task_id, collection, tasks) → dict` | Save as `_updated.json` | `services/subtitle_api.py` |
-| `SubtitleService.search_subtitles` | `(task_id, request, tasks) → SubtitleSearchResult` | Text/regex search | `services/subtitle_api.py` |
-| `SubtitleCollection.split_subtitle` | `(index, split_time) → bool` | Split at timestamp | `models.py` |
-| `SubtitleCollection.merge_subtitles` | `(start_index, end_index) → bool` | Merge range | `models.py` |
-| `SubtitleCollection.add_subtitle` | `(subtitle) → None` | Append subtitle | `models.py` |
-| `SubtitleCollection.remove_subtitle` | `(index) → bool` | Remove by index | `models.py` |
+## I need to download media from a URL
 
-## I need to convert subtitle formats
+| Intent | Use |
+|---|---|
+| Complete URL input step (progress + download) | `backend/services/url_preprocessing.py:prepare_url_input(*, task, request, output_directory, download)` |
+| Build yt-dlp options | `backend/shared/download_helpers.py:build_yt_dlp_options(...)` |
+| Produce a safe filename title | `backend/shared/download_helpers.py:build_safe_title(title, fallback_name=None)` |
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `SubtitleConverter.convert` | `(collection, format, output_file, encoding, **opts) → str` | Convert + write to file | `services/subtitle_converter.py` |
-| `SubtitleConverter.is_format_supported` | `(format) → bool` | Check format support | `services/subtitle_converter.py` |
-| `SubtitleConverter.get_supported_formats` | `() → list` | List all formats | `services/subtitle_converter.py` |
-| `build_srt_entry` | `(index, start, end, text) → str` | Single SRT block | `shared/transcription_pipeline.py` |
-| `build_vtt_entry` | `(start, end, text) → str` | Single VTT block | `shared/transcription_pipeline.py` |
+## I need to work with video files
 
-## I need to process/transform text
+| Intent | Use |
+|---|---|
+| Check if path is a video | `backend/shared/video_utils.py:is_video_file(path)` |
+| Convert any video to browser-friendly mp4 | `backend/shared/video_utils.py:prepare_source_video_for_preview(*, source_path, output_dir, task_id, status_callback=None)` |
+| Build the raw ffmpeg command list | `backend/shared/video_utils.py:build_mp4_conversion_command(source, target)` |
+| Add a transcoded mp4 alongside outputs | `backend/shared/video_utils.py:maybe_prepare_video_output(...)` |
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `convert_to_traditional` | `(text: str) → str` | Simplified → Traditional Chinese | `shared/text_processing.py` |
-| `strip_punctuation` | `(text: str) → str` | Remove all punctuation | `shared/text_processing.py` |
-| `smart_strip_punctuation` | `(text: str) → str` | Remove only trailing periods | `shared/text_processing.py` |
-| `swap_first_two_lines` | `(text: str) → str` | Swap line 1 ↔ line 2 (bilingual) | `shared/text_processing.py` |
-| `split_long_segments` | `(segments_json, words_data, max_duration=15.0)` | Split at word boundaries | `shared/text_processing.py` |
-| `format_timestamp` | `(seconds, format="srt") → str` | Seconds → SRT/VTT timestamp | `shared/transcribe_helpers.py` |
+## I need to expose / consume GPU info
 
-## I need LLM subtitle enhancement
+| Intent | Use |
+|---|---|
+| Get structured GPU info | `backend/shared/transcribe_helpers.py:check_gpu(torch_module=None)` |
+| Decide how many workers to run | `backend/app.py:_detect_max_workers()` (called once at import) |
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `enhance_subtitles` | `(segments, *, api_key, base_url, model, content_hint, status_callback)` | Full batch enhancement | `shared/llm_postprocess.py` |
-| `merge_short_segments` | `(segments, target_chars=20, max_chars=30) → list` | Merge short + resplit long | `shared/llm_postprocess.py` |
-| `resplit_long_segments` | `(segments, target_chars=20, max_chars=30) → list` | Split at punctuation marks | `shared/llm_postprocess.py` |
-| `build_translate_prompt` | `(target_language: str) → str` | Build translation system prompt | `shared/llm_postprocess.py` |
-| `_call_llm` | `(client, model, lines, content_hint, ...) → List[str]` | Call LLM with retry logic | `shared/llm_postprocess.py` |
-| `_chunk_lines` | `(lines, max_lines=80, max_chars=6000) → List[List[int]]` | Split into API-sized batches | `shared/llm_postprocess.py` |
+## I need to post-process subtitles via an LLM
 
-**Decision guide**: Use `enhance_subtitles()` for batch processing in background tasks. Use the SSE endpoint `POST /api/subtitles/enhance` for interactive frontend use.
+| Intent | Use |
+|---|---|
+| Enhance subtitles (fix ASR mistakes) | `backend/shared/llm_postprocess.py:enhance_subtitles(segments, *, api_key, base_url, model, content_hint=None, status_callback=None, mode="enhance")` |
+| Translate subtitles | `enhance_subtitles(..., mode="translate", target_language="...")` |
+| Merge short segments before LLM | `backend/shared/llm_postprocess.py:merge_short_segments(segments)` |
+| Re-split long sentences after LLM | `backend/shared/llm_postprocess.py:resplit_long_segments(segments)` |
+| Summarize + chapterize | `backend/shared/llm_postprocess.py:summarize_subtitles(segments, *, api_key, base_url, model, content_hint=None)` |
+| Rewrite localhost URL (Docker) | `backend/shared/llm_postprocess.py:_rewrite_localhost_url(url)` (private; mirror in `app.py`) |
 
-## I need to handle speaker diarization
+## I need to manage folders
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `run_diarization` | `(audio_path, num_speakers=None, ...) → List[Tuple]` | Run pyannote diarization | `services/diarization_service.py` |
-| `assign_speakers_to_segments` | `(asr_segments, diarization_segments) → list` | Match speakers to ASR segments | `services/diarization_service.py` |
+| Intent | Use |
+|---|---|
+| Any folder CRUD | `backend/services/folder_api.py` router |
+| Set the tasks registry that folder endpoints use | `backend/services/folder_api.py:set_folder_task_registry(registry)` |
+| Reorder folders or tasks | `PUT /api/folders/reorder` / `PUT /api/folders/{id}/tasks/reorder` |
 
-## I need to handle re-transcription
+## I need to call the backend from the frontend
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `get_retranscribe_service` | `() → RetranscribeService` | Get/create singleton service | `services/retranscribe_service.py` |
-| `RetranscribeService.create_retranscribe_task` | `(request) → str` | Create + submit re-transcribe job | `services/retranscribe_service.py` |
-| `AudioSegmentService.extract_segment` | `(request) → result` | Extract audio segment via FFmpeg | `services/audio_segment_service.py` |
+| Intent | Use |
+|---|---|
+| Any REST call | `frontend-react/src/api/client.ts:api.<method>(...)` |
+| Task SSE stream | `frontend-react/src/hooks/use-task-stream.ts:useTaskStream(taskId, enabled?)` |
+| Query all tasks | `frontend-react/src/hooks/use-tasks.ts` |
+| Query a single task | `frontend-react/src/hooks/use-task.ts` |
+| Load subtitles | `frontend-react/src/hooks/use-subtitles.ts` |
+| List folders | `frontend-react/src/hooks/use-folders.ts` |
+| GPU info | `frontend-react/src/hooks/use-gpu-info.ts` |
+| LLM settings persistence | `frontend-react/src/hooks/use-llm-settings.ts` |
+| Toast notifications | `frontend-react/src/hooks/use-task-notifications.ts` + `stores/toast-store.ts` |
 
-## I need to burn subtitles into video
+## Decision Guides
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `start_burn_in` | `(task_id, subtitles, video_path, output_dir, **style) → str` | Start burn-in thread | `services/burn_in_service.py` |
-| `get_burn_in_task` | `(burn_id) → Optional[dict]` | Check burn-in progress | `services/burn_in_service.py` |
+### "Do I submit via `executor.submit` or just `await` the work?"
+- Blocking (CPU/GPU/ffmpeg/torch): submit to `_transcription_executor` via `submit_transcription`.
+- I/O bound async-capable (httpx): use `await` inside the async route directly.
 
-## I need to check system/GPU status
+### "Do I load subtitles from `json` or `updated_json`?"
+- Use `SubtitleService.load_subtitle_data`; it already prefers `updated_json`. Do not reimplement.
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `check_gpu` | `(torch_module=None) → dict` | GPU availability + memory info | `shared/transcribe_helpers.py` |
-| `resolve_device` | `(device: str, verbose=False) → str` | Normalize 'auto'/'cuda' → 'cuda:0'/'cpu' | `shared/transcription_pipeline.py` |
-| `is_supported_media_file` | `(path: str) → bool` | Check file extension | `shared/media_config.py` |
-| `get_media_type` | `(path: str) → str` | Get MIME type for extension | `shared/media_config.py` |
+### "Should this constant go in `media_config.py` or somewhere local?"
+- If it is a supported extension or MIME type: `backend/shared/media_config.py`. Everywhere else should import from there.
 
-## I need to write transcription output files
+### "Do I call the engine directly?"
+- No. Always go through `backend.shared.engine_routing.transcribe_audio(**kwargs)`. If adding a new engine, register its model names in `FUNASR_MODEL_NAMES` or extend the dispatch there.
 
-| Function | Signature | Purpose | File |
-|---|---|---|---|
-| `write_output_files` | `(base_path, filename, format, ...) → dict` | Write txt/srt/vtt/json | `shared/transcription_pipeline.py` |
-| `init_output_paths` | `(audio_path, output_dir) → (Path, str)` | Setup output directory | `shared/transcription_pipeline.py` |
-| `init_buffers` | `() → dict` | Fresh accumulator buffers | `shared/transcription_pipeline.py` |
+### "Do I need `build_status_callback`?"
+- Yes, any engine or long task that reports progress must accept a `status_callback(message=?, progress=?, segment=?)` and call it. The stock builder already persists state.
+
+### "Where do I put a helper that has no FastAPI dependency?"
+- `backend/shared/`. If it uses `HTTPException` or router-specific types, it belongs in `backend/services/`.

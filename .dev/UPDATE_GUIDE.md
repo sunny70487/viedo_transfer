@@ -1,99 +1,78 @@
-# Update Guide — Keeping AGENTS.md and .dev/ in Sync
+# Instruction Layer — Update Guide
 
-This document describes the workflow for updating project documentation when code changes.
-
-## When to Update
-
-Update documentation when any of these occur:
-- New module/file added or existing one renamed/deleted
-- API endpoint added, changed, or removed
-- New configuration keys introduced
-- Function signatures change in public APIs
-- New design patterns or conventions established
-- Error handling or logging patterns change
-
-## Update Workflow
-
-### Step 1: Run diff summary
-
-```bash
-bash .dev/scripts/diff-summary.sh
-```
-
-This shows what changed since the last documentation sync. On first run, it compares against the initial commit.
-
-### Step 2: Analyze changes
-
-Review the diff summary output. Focus on:
-- New/deleted source files → update module map in `AGENTS.md`
-- Changed API routes → update `.dev/api-reference.md`
-- New functions → update `.dev/function-index.md`
-- Config changes → update `.dev/config-reference.md`
-- Architecture changes → update `.dev/architecture.md`
-
-### Step 3: Update relevant files
-
-**Important**: First, list all `.dev/*.md` files to discover the current set. Do NOT rely on a hardcoded list — new files may have been added.
-
-```bash
-ls .dev/*.md
-```
-
-Then update each affected file.
-
-### Step 4: Decide if a new .dev/ file is needed
-
-Create a new `.dev/<topic>.md` file when ALL of these are true:
-1. The topic doesn't fit naturally into any existing `.dev/` file
-2. It's too detailed for `AGENTS.md` (which should stay under 150 lines)
-3. Developers would need this reference when working on related features
-
-When creating a new file:
-- Add it to the "Deep References" table in `AGENTS.md`
-- Add it to the "File Inventory" table below
-- Keep it under 300 lines; split into focused sub-files if larger
-
-### Step 5: Mark sync point
-
-```bash
-bash .dev/scripts/diff-summary.sh --mark
-```
-
-This saves the current HEAD as the baseline for future diffs.
-
-### Step 6: Report to user
-
-Summarize what was updated and why.
+This is the self-maintaining workflow for the agent instruction files. The goal is: whenever the codebase changes shape, these files are refreshed in the same PR.
 
 ## File Inventory
 
-| File | Purpose | Update triggers |
+| File | Owner domain | Refresh trigger |
 |---|---|---|
-| `AGENTS.md` | Root guide — module map, naming rules, quick reference | New modules, renamed files, convention changes |
-| `.dev/architecture.md` | System design, concurrency, data structures, pitfalls | Architectural changes, new services, threading changes |
-| `.dev/api-reference.md` | Full API listing, request/response formats | New/changed endpoints, auth changes |
-| `.dev/coding-style.md` | Naming examples, error patterns, test guide | Convention changes, new patterns adopted |
-| `.dev/function-index.md` | Function lookup by developer intent | New public functions, signature changes |
-| `.dev/config-reference.md` | All config keys, types, defaults | New env vars, default changes, Docker config |
-| `.dev/UPDATE_GUIDE.md` | This file — self-maintaining workflow | New .dev/ files added or removed |
-| `.dev/scripts/diff-summary.sh` | Diff summary helper script | Rarely (script logic changes only) |
+| `AGENTS.md` | Root instruction — read first by agents | Any change to verification commands, architectural rules, or module map |
+| `CLAUDE.md` | Exact duplicate of `AGENTS.md` for Claude-specific tools | Keep byte-equal to `AGENTS.md` |
+| `.dev/architecture.md` | System design, concurrency, globals, pitfalls | New module relationships, thread changes, new globals |
+| `.dev/api-reference.md` | Endpoint listing + add-endpoint recipe | Any route added / renamed / removed |
+| `.dev/coding-style.md` | Naming, error handling, logging, templates | New convention introduced, template needs updating |
+| `.dev/function-index.md` | Intent-based lookup table | New public helper added, existing helper moved/renamed |
+| `.dev/config-reference.md` | Env vars, constants, schema | New env var, DB column, module constant |
+| `.dev/UPDATE_GUIDE.md` | This file | When the update workflow itself changes |
+| `.dev/scripts/diff-summary.sh` | Git-based diff helper | When summary fields need adjusting |
+| `.dev/scripts/verify.sh` | Single entry-point for lint + tests + frontend build | When verification steps change (keep in sync with `AGENTS.md`) |
+| `.dev/exec-plans/templates/exec-plan-template.md` | Multi-step plan skeleton | When plan section conventions change |
+| `.dev/exec-plans/active/` | In-progress plans (committed) | Add/remove one file per plan; move to `completed/` when done |
+| `.dev/exec-plans/completed/` | Finished plans kept for decision history | Never delete — append new completed plans here |
+| `PROGRESS.md` (root, gitignored) | Local per-session state tracker | Update at end of each session; read at start of each session |
+| `.dev/tool-access.md` | AI agent capability + forbidden-ops policy | When adding/removing common commands, changing forbidden ops, or escalation rules |
 
-## Sync Point File
+## When to Update
 
-The file `.skill-sync-commit` in the project root stores the last synced commit hash. It is:
-- Created by `diff-summary.sh --mark`
-- Listed in `.gitignore` (local-only, not committed)
-- Used as the baseline for `diff-summary.sh` to detect changes
+Trigger | Files to touch
+---|---
+Added/removed/renamed an endpoint | `.dev/api-reference.md`, `AGENTS.md` (if a module appeared/disappeared), `CLAUDE.md`
+Added a new Python module under `backend/services/` or `backend/shared/` | `AGENTS.md` module map, `CLAUDE.md`, `.dev/function-index.md`, `.dev/architecture.md` if it holds state
+Added/removed a global or changed an injector | `.dev/architecture.md` ("Key Globals"), `AGENTS.md` hard constraints
+Added an env var | `.dev/config-reference.md`
+Changed a Pydantic / ORM model | `.dev/config-reference.md` (if DB schema), `.dev/api-reference.md` (if request/response)
+Renamed / moved an existing helper | `.dev/function-index.md`, grep for any other references
+Updated verification commands or CI | `AGENTS.md`, `CLAUDE.md`, `.dev/coding-style.md` checklist, `.dev/config-reference.md`
+Introduced a new naming or error convention | `.dev/coding-style.md`, and add a table row to `AGENTS.md` + `CLAUDE.md`
 
-## Guidelines for Each File
+## Workflow
 
-### AGENTS.md (< 150 lines)
-- Keep compact — one-liner descriptions only
-- Module map: flat table, no nesting
-- Link to `.dev/` files for details
+1. Before starting a refactor, run `.dev/scripts/diff-summary.sh` to get the current scope.
+2. Make the code change.
+3. Run the full verification: `bash .dev/scripts/verify.sh` (or `--backend-only` / `--frontend-only` to narrow scope). Success ends with `--- verify.sh OK ---`.
+4. Re-run `.dev/scripts/diff-summary.sh` and review which doc files the trigger table says to touch.
+5. Update `AGENTS.md` + `CLAUDE.md` first (they are kept in sync — copy one to the other). Use a plain file copy; do not hand-maintain two drifting versions.
+6. Update any `.dev/*.md` files listed for your trigger.
+7. Stage every modified instruction file in the same commit as the code change:
+   ```
+   git add AGENTS.md CLAUDE.md .dev/
+   ```
 
-### .dev/ files (< 300 lines each)
-- Written for AI tools that need deeper context
-- Include real code examples extracted from the codebase
-- Organize by developer intent, not by file structure
-- Keep cross-references between files when relevant
+## Keep AGENTS.md and CLAUDE.md in Sync
+
+On POSIX, a symlink is acceptable:
+```
+ln -sf AGENTS.md CLAUDE.md
+```
+On Windows or when symlinks are not supported, maintain them as byte-equal copies. The test is:
+```
+git diff --no-index AGENTS.md CLAUDE.md
+```
+which must produce no output.
+
+## Validation Tips
+
+- Every path mentioned should be relative to the repo root (use `git rev-parse --show-toplevel` to confirm when scripting).
+- Every command in a fenced block must be copy-pasteable and executable from the repo root on a fresh shell.
+- When citing a real line of code, include the file path; do not include the absolute filesystem path.
+- If you're uncertain what changed, run `git diff main... -- backend/ frontend-react/ tests/` and let the diff drive the doc update.
+
+## Review Checklist for Reviewers
+
+Before approving a PR:
+
+- [ ] Does the PR change any public function in `backend/services/` or `backend/shared/`? If yes, is `.dev/function-index.md` updated?
+- [ ] Does the PR add/remove a route? If yes, is `.dev/api-reference.md` updated?
+- [ ] Does the PR add an env var? If yes, is `.dev/config-reference.md` updated?
+- [ ] Are `AGENTS.md` and `CLAUDE.md` still identical?
+- [ ] Do the verification commands in `AGENTS.md` still match `.github/workflows/ci.yml`?

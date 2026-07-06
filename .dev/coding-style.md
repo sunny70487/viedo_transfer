@@ -1,238 +1,260 @@
-# Coding Style Guide
+# Coding Style
 
 ## Pre-Commit Checklist
 
-1. [ ] Code passes `flake8` with default settings (line length 79)
-2. [ ] New functions have type hints on parameters and return values
-3. [ ] Error paths log with `logger.error(msg, exc_info=True)`
-4. [ ] New API endpoints return proper HTTP status codes via `HTTPException`
-5. [ ] Pydantic models use `Field(...)` with descriptions for API-facing fields
-6. [ ] Tests added for new logic in `tests/test_<module>.py`
-7. [ ] TypeScript types mirror backend Pydantic models in `types/api.ts`
-8. [ ] No hardcoded absolute paths — use `Path(__file__).resolve().parent` or env vars
+Run these (in order) before every commit. They must all pass.
 
-## Python Naming (with real examples)
+```
+python -m flake8 tests backend/shared backend/services backend/models.py backend/task_persistence.py
+python -m pytest tests/ -q
+npm --prefix frontend-react run lint
+npm --prefix frontend-react run build
+```
 
-### Functions
+Additional manual checks:
+
+- No secrets in diff (`git diff --cached`).
+- New imports resolve against `backend/requirements.txt` or `frontend-react/package.json`.
+- New files follow the naming tables below.
+- New endpoints have a matching `tests/test_*.py` case.
+- If the `Task` model changed, update `TaskRecord` in `backend/database.py` and add a migration in `_run_migrations`.
+
+## Naming — Real Examples
+
+| Kind | Convention | Real example |
+|---|---|---|
+| Python file | `snake_case.py` | `backend/services/transcription_launcher.py` |
+| Python function | verb-first `snake_case` | `resolve_output_directory(*, request, task_id, output_root)` |
+| Private helper | leading underscore | `_detect_max_workers()` in `backend/app.py` |
+| Module singleton | leading underscore | `_transcription_executor` in `backend/app.py` |
+| Pydantic class | `<Domain><Role>` | `RetranscribeRequest`, `SubtitleExportRequest` in `backend/models.py` |
+| Service class | `PascalCase` | `RetranscribeService` in `backend/services/retranscribe_service.py` |
+| Constant set | `UPPER_SNAKE_CASE` | `FUNASR_MODEL_NAMES` in `backend/shared/engine_routing.py` |
+| TS component file | `PascalCase.tsx` | `frontend-react/src/components/editor/SubtitleRow.tsx` |
+| TS hook file | `use-kebab-case.ts` | `frontend-react/src/hooks/use-task-stream.ts` |
+| TS store file | `<name>-store.ts` | `frontend-react/src/stores/editor-store.ts` |
+| Zustand store hook | `use<Pascal>Store` | `useEditorStore` |
+| Test file | `test_<module>.py` | `tests/test_transcription_progress.py` |
+
+Keyword-only arguments are preferred for any public helper with 3+ parameters:
+
 ```python
-# Public API functions — descriptive verb phrases
-def create_task_entry(*, tasks, save_task, source_name, batch_id=None):
+# backend/services/transcription_progress.py
+def estimate_total_steps(
+    *,
+    split_segments,
+    segment_duration,
+    file_path,
+    get_duration,
+    get_file_size_mb,
+):
+    ...
+```
+
+## Error Handling — Real Examples
+
+```python
+# 1. API boundary validation → HTTPException
+# backend/services/task_api.py:27
+if task_id not in tasks:
+    raise HTTPException(status_code=404, detail="任務不存在")
+
+# 2. Validation helpers → (bool, error_msg) tuple
+# backend/services/upload_preprocessing.py:8
 def validate_upload_filename(filename: str):
-def transcribe_audio(**kwargs):
-def build_status_callback(*, task, save_task):
-def finalize_task_success(*, task, transcription_results, output_directory, now):
+    if not filename:
+        return False, "未提供文件名"
+    ...
+    return True, None
 
-# Private helpers — leading underscore
-def _detect_max_workers() -> int:
-def _apply_llm_enhancement(transcription_results, request, status_callback):
-def _rewrite_localhost_url(url: str) -> str:
-def _find_video_path(task) -> Optional[str]:
-```
-
-### Classes
-```python
-class SubtitleCollection(BaseModel):
-class TaskPersistence:          # Static-method-only utility class
-class RetranscribeService:      # Stateful service with ThreadPoolExecutor
-class SubtitleConverter:        # Stateless converter
-class TaskStore:                # Thin wrapper around dict
-```
-
-### Constants
-```python
-SUPPORTED_MEDIA_EXTENSIONS = AUDIO_EXTENSIONS | VIDEO_EXTENSIONS
-FUNASR_MODEL_NAMES = frozenset({...})
-MAX_WORKERS = _detect_max_workers()
-_MAX_LINES_PER_BATCH = 80      # Module-private constant
-_BATCH_COOLDOWN = 1.0
-```
-
-### Variables
-```python
-task_id = str(uuid.uuid4())
-output_directory = resolve_output_directory(...)
-subtitle_collection = SubtitleService.load_subtitle_data(task_id, tasks)
-```
-
-## TypeScript Naming (with real examples)
-
-### Files and components
-```
-frontend-react/src/stores/editor-store.ts    # kebab-case for non-component files
-frontend-react/src/components/editor/SubtitleRow.tsx  # PascalCase for components
-frontend-react/src/hooks/use-tasks.ts        # use-kebab-case for hooks
-frontend-react/src/lib/utils.ts              # kebab-case for utilities
-```
-
-### Types and interfaces
-```typescript
-export interface SubtitleCollection { task_id: string; subtitles: Subtitle[]; ... }
-export interface TranscriptionRequest { url?: string; model_size?: string; ... }
-```
-
-### State stores (Zustand)
-```typescript
-export const useEditorStore = create<EditorState>()((set, get) => ({
-  subtitles: [],
-  setSubtitles: (subs) => { ... },
-  updateSubtitle: (index, update) => { ... },
-}))
-```
-
-## Error Handling Patterns
-
-### Route handler (standard pattern)
-```python
-@router.get("/{task_id}")
-async def get_subtitles(task_id: str):
-    tasks = get_tasks_storage()
-    if task_id not in tasks:
-        raise HTTPException(status_code=404, detail="任務不存在")
-    # ... business logic ...
-```
-
-### Service method with cleanup
-```python
-try:
-    result = do_work()
-    task.status = "completed"
+# 3. Worker-level broad except with full logger context
+# backend/app.py:373
 except Exception as e:
-    logger.error(f"操作失敗: {str(e)}", exc_info=True)
-    task.status = "failed"
-    task.error = str(e)
-finally:
-    cleanup_temp_files()
+    logger.error(f"任務 {task_id} 失敗: {str(e)}", exc_info=True)
+    finalize_task_failure(task=task, error=e, now=time.time())
+    save_task_to_disk(task)
+
+# 4. Non-fatal paths use logger.warning and swallow
+# backend/app.py:350
+except Exception as llm_err:
+    logger.warning("LLM enhancement failed (non-fatal): %s", llm_err)
+
+# 5. Precondition failures raise RuntimeError from helpers
+# backend/services/url_preprocessing.py:14
+if not downloaded_file:
+    raise RuntimeError("下載失敗")
 ```
 
-### Background worker (process_transcription pattern)
-```python
-def process_transcription(task_id, file_path, request):
-    task = tasks[task_id]
-    try:
-        # ... do work, update task.progress along the way ...
-        finalize_task_success(task=task, ...)
-        save_task_to_disk(task)
-    except Exception as e:
-        logger.error(f"任務 {task_id} 失敗: {str(e)}", exc_info=True)
-        finalize_task_failure(task=task, error=e, now=time.time())
-        save_task_to_disk(task)
-```
-
-### Frontend API error handling
-```typescript
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { headers: { 'Content-Type': 'application/json' }, ...init })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.detail || body.error || `Request failed: ${res.status}`)
-  }
-  return res.json()
-}
-```
+Rules of thumb:
+- Raise `HTTPException` only in route handlers or helpers that are always called from them.
+- In background workers, always log the exception with `exc_info=True` before updating task state.
+- Do not catch `Exception` in pure helpers — let the caller decide.
 
 ## Logging Guide
+
+Logging is configured once in `backend/app.py`:
+
+```python
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(), logging.FileHandler("whisper_app.log")],
+)
+```
+
+Per-module pattern:
 
 ```python
 import logging
 logger = logging.getLogger("my_module")
-
-# Operation start/completion
-logger.info("Task %s submitted (pool active ≈ %d)", task_id, len(executor._threads))
-
-# Non-fatal issues
-logger.warning("LLM enhancement failed (non-fatal): %s", err)
-
-# Failures — always include exc_info
-logger.error(f"任務 {task_id} 失敗: {str(e)}", exc_info=True)
-
-# Verbose debugging (persistence layer)
-logger.debug(f"任務 {task_id} 已保存到資料庫")
 ```
+
+Level matrix:
+
+| Level | When to use | Example |
+|---|---|---|
+| DEBUG | Frequent, low-value diagnostic | `logger.debug(f"任務 {task_id} 已保存到資料庫")` |
+| INFO | Lifecycle events | `logger.info("Batch %s created with %d URL task(s)", batch_id, len(ids))` |
+| WARNING | Non-fatal degradation | `logger.warning("LLM enhancement failed (non-fatal): %s", err)` |
+| ERROR | Caught exception, always pair with `exc_info=True` | `logger.error("Failed to list folders: %s", e, exc_info=True)` |
+
+Both `%s` placeholders and f-strings are accepted; prefer `%s` in hot paths.
 
 ## Test Writing Guide
 
-### File naming
-```
-tests/test_<module_name>.py
-```
+Location: `tests/` (flat, no nesting).
+Naming: `test_<module_under_test>.py`, function `test_<behavior_in_words>()`.
 
-### Test structure (pytest)
+Common ingredients:
+
 ```python
-import pytest
-from pydantic import ValidationError
-from backend.models import Subtitle
+# Lightweight stub objects
+from types import SimpleNamespace
+task = SimpleNamespace(status="processing", message="", partial_segments=None)
 
-def test_subtitle_strips_surrounding_whitespace():
-    subtitle = Subtitle(index=0, start_time=0.0, end_time=1.5, text="  測試  ")
-    assert subtitle.text == "測試"
+# Patch module-level attributes (engine, SessionLocal, etc.)
+monkeypatch.setattr(task_persistence_module, "SessionLocal", test_session)
 
-def test_subtitle_rejects_whitespace_only_text():
-    with pytest.raises(ValidationError, match="字幕文字不能為空"):
-        Subtitle(index=0, start_time=0.0, end_time=1.5, text="   ")
+# Import isolation for modules with startup side effects
+import importlib, sys
+sys.modules.pop("backend.services.subtitle_api", None)
+subtitle_api = importlib.import_module("backend.services.subtitle_api")
+
+# HTTP testing
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+app = FastAPI()
+app.include_router(router)
+client = TestClient(app)
 ```
 
-### Mocking pattern (for service tests)
-```python
-from unittest.mock import MagicMock, patch
-
-def test_create_task_entry():
-    tasks = {}
-    save = MagicMock()
-    task = create_task_entry(tasks=tasks, save_task=save, source_name="test.mp3")
-    assert task.id in tasks
-    save.assert_called_once()
-```
-
-### Running tests
-```bash
-python -m pytest tests/ -q          # All tests
-python -m pytest tests/test_models.py -v  # Single file, verbose
-```
-
-## Adding Dependencies
-
-### Python (backend)
-1. Add to `backend/requirements.txt` with minimum version: `package>=x.y.z`
-2. Platform-specific: use PEP 508 markers: `pywin32>=305; platform_system=="Windows"`
-3. Docker: if the package needs special CUDA handling, add install step in `Dockerfile`
-
-### Node.js (frontend)
-```bash
-cd frontend-react && npm install <package>
-```
+Policy:
+- Every new public function in `backend/services/` or `backend/shared/` ships with at least one test.
+- Prefer `SimpleNamespace` to full Pydantic models when testing pure functions — it matches the attribute-access style the code uses.
+- For persistence, use an in-memory SQLite created via `create_engine(f"sqlite:///{tmp_path}/test.db")` and patch `SessionLocal`.
+- Do not share state between test files; there is no `conftest.py`.
 
 ## File Templates
 
-### New service file (`backend/services/my_service.py`)
+### Python service module
+
 ```python
+"""<module purpose — one line>"""
+
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 
-logger = logging.getLogger("my_service")
-router = APIRouter(prefix="/api/myservice", tags=["myservice"])
+logger = logging.getLogger("my_api")
+
+router = APIRouter(prefix="/api/my", tags=["my"])
 
 _registry: Optional[Dict[str, Any]] = None
 
-def set_registry(tasks: Dict[str, Any]) -> None:
+
+def set_my_registry(reg: Dict[str, Any]) -> None:
     global _registry
-    _registry = tasks
+    _registry = reg
+
+
+def _get_registry() -> Dict[str, Any]:
+    if _registry is None:
+        raise RuntimeError("my_api 未初始化")
+    return _registry
+
 
 @router.get("/{item_id}")
-async def get_item(item_id: str):
-    if _registry is None:
-        raise RuntimeError("Registry not initialized")
-    # ... implementation ...
+async def read_item(item_id: str):
+    reg = _get_registry()
+    if item_id not in reg:
+        raise HTTPException(status_code=404, detail="找不到項目")
+    return reg[item_id]
 ```
 
-### New test file (`tests/test_my_service.py`)
-```python
-import pytest
+### Python shared helper
 
-def test_my_feature_basic():
-    # Arrange
-    # Act
-    # Assert
-    pass
+```python
+"""<helper purpose — one line>"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def compute_something(*, value: int, factor: int = 2) -> int:
+    if value < 0:
+        raise ValueError("value must be non-negative")
+    return value * factor
+```
+
+### Test template
+
+```python
+from types import SimpleNamespace
+
+from backend.services.my_module import compute_something
+
+
+def test_compute_something_doubles_by_default():
+    assert compute_something(value=5) == 10
+
+
+def test_compute_something_rejects_negative():
+    import pytest
+    with pytest.raises(ValueError):
+        compute_something(value=-1)
+```
+
+### React hook template
+
+```ts
+// frontend-react/src/hooks/use-my-thing.ts
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/api/client'
+
+export function useMyThing(id: string) {
+  return useQuery({
+    queryKey: ['my-thing', id],
+    queryFn: () => api.getMyThing(id),
+    enabled: !!id,
+  })
+}
+```
+
+### Zustand store template
+
+```ts
+// frontend-react/src/stores/my-store.ts
+import { create } from 'zustand'
+
+interface MyState {
+  count: number
+  increment: () => void
+}
+
+export const useMyStore = create<MyState>()((set) => ({
+  count: 0,
+  increment: () => set((s) => ({ count: s.count + 1 })),
+}))
 ```

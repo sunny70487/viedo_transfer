@@ -1,131 +1,93 @@
 #!/usr/bin/env bash
-# diff-summary.sh — Show what changed since last documentation sync
+# diff-summary.sh — produce a compact summary of outstanding changes
+# in this repository, grouped by doc-impact area.
+#
 # Usage:
-#   bash .dev/scripts/diff-summary.sh          # Show changes since last sync
-#   bash .dev/scripts/diff-summary.sh --mark   # Save current HEAD as sync point
-#   bash .dev/scripts/diff-summary.sh --full   # Show detailed diff
-#   bash .dev/scripts/diff-summary.sh <from> <to>  # Manual commit range
+#   .dev/scripts/diff-summary.sh [<base-ref>]
+#
+# Default base ref is the first of: origin/main, origin/master, HEAD.
+# All file paths are relative to the repository root.
 
 set -euo pipefail
 
-PROJECT_ROOT="$(git rev-parse --show-toplevel)"
-SYNC_FILE="${PROJECT_ROOT}/.skill-sync-commit"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
 
-# --- Helper: resolve base commit ---
-resolve_base() {
-    if [[ -f "$SYNC_FILE" ]]; then
-        cat "$SYNC_FILE"
-    else
-        git rev-list --max-parents=0 HEAD | head -1
+pick_base_ref() {
+    if [ -n "${1:-}" ]; then
+        echo "$1"
+        return
+    fi
+    for ref in origin/main origin/master main master; do
+        if git rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
+            echo "$ref"
+            return
+        fi
+    done
+    echo "HEAD"
+}
+
+BASE_REF="$(pick_base_ref "${1:-}")"
+
+echo "=== diff-summary against ${BASE_REF} ==="
+echo
+
+# 1. Raw file list (status + path)
+echo "--- changed files ---"
+git diff --name-status "${BASE_REF}" -- . ':!tasks.db' ':!outputs/**' ':!uploads/**' ':!temp/**' ':!frontend-react/node_modules/**' || true
+echo
+
+# 2. Group by doc-impact area
+summarize_group() {
+    local label="$1"
+    shift
+    local files
+    files="$(git diff --name-only "${BASE_REF}" -- "$@" 2>/dev/null || true)"
+    if [ -n "$files" ]; then
+        echo "--- ${label} ---"
+        echo "$files"
+        echo
     fi
 }
 
-# --- Mark current HEAD as sync point ---
-if [[ "${1:-}" == "--mark" ]]; then
-    git rev-parse HEAD > "$SYNC_FILE"
-    echo "Sync point saved: $(cat "$SYNC_FILE")"
-    exit 0
-fi
+summarize_group "backend routes/services (→ api-reference.md, function-index.md)" \
+    'backend/services/**' 'backend/app.py'
 
-# --- Resolve commit range ---
-if [[ $# -ge 2 ]]; then
-    BASE="$1"
-    HEAD_REF="$2"
-elif [[ $# -eq 1 && "$1" != "--full" ]]; then
-    BASE="$1"
-    HEAD_REF="HEAD"
+summarize_group "backend shared helpers (→ function-index.md, coding-style.md)" \
+    'backend/shared/**'
+
+summarize_group "backend models (→ api-reference.md, config-reference.md)" \
+    'backend/models.py' 'backend/database.py' 'backend/task_persistence.py'
+
+summarize_group "transcription engines (→ AGENTS.md hard constraints)" \
+    'backend/qwen3_asr_transcribe.py' 'backend/funasr_transcribe.py' \
+    'backend/faster_whisper_transcribe.py' 'backend/shared/engine_routing.py'
+
+summarize_group "frontend (→ AGENTS.md module map, verification step)" \
+    'frontend-react/**'
+
+summarize_group "tests (→ coding-style.md test policy)" \
+    'tests/**'
+
+summarize_group "CI / tooling (→ AGENTS.md verification, config-reference.md)" \
+    '.github/**' '.flake8' 'pyproject.toml' 'requirements-dev.txt' \
+    'Dockerfile' 'docker-compose.yml' 'backend/requirements.txt' \
+    'frontend-react/package.json' 'frontend-react/eslint.config.js' \
+    'frontend-react/vite.config.ts'
+
+summarize_group "instruction layer (→ verify AGENTS.md and CLAUDE.md stay in sync)" \
+    'AGENTS.md' 'CLAUDE.md' '.dev/**'
+
+# 3. Integrity check: AGENTS.md must equal CLAUDE.md
+echo "--- AGENTS.md vs CLAUDE.md ---"
+if git diff --no-index --quiet AGENTS.md CLAUDE.md 2>/dev/null; then
+    echo "identical (ok)"
 else
-    BASE="$(resolve_base)"
-    HEAD_REF="HEAD"
+    echo "DIFFER — reconcile before committing"
+    git diff --no-index --stat AGENTS.md CLAUDE.md || true
 fi
+echo
 
-FULL_DIFF=false
-if [[ "${1:-}" == "--full" || "${2:-}" == "--full" || "${3:-}" == "--full" ]]; then
-    FULL_DIFF=true
-fi
-
-echo "================================================================"
-echo " Documentation Sync Summary"
-echo " Base: ${BASE:0:12}"
-echo " Head: $(git rev-parse "${HEAD_REF}" | head -c 12)"
-echo " Range: $(git rev-list --count "${BASE}..${HEAD_REF}") commits"
-echo "================================================================"
-echo ""
-
-# --- Commit log ---
-echo "## Recent Commits"
-echo ""
-git log --oneline --no-decorate "${BASE}..${HEAD_REF}" | head -30
-echo ""
-
-# --- Changed source files (excluding docs, configs, generated) ---
-echo "## Changed Source Files"
-echo ""
-git diff --name-status "${BASE}..${HEAD_REF}" -- \
-    'backend/**/*.py' \
-    'frontend-react/src/**' \
-    'tests/**' \
-    'docker-compose.yml' \
-    'Dockerfile' \
-    | sort
-echo ""
-
-# --- New files ---
-echo "## New Files"
-echo ""
-git diff --name-status --diff-filter=A "${BASE}..${HEAD_REF}" -- \
-    'backend/' 'frontend-react/src/' 'tests/' \
-    | sort
-echo ""
-
-# --- Deleted files ---
-echo "## Deleted Files"
-echo ""
-git diff --name-status --diff-filter=D "${BASE}..${HEAD_REF}" -- \
-    'backend/' 'frontend-react/src/' 'tests/' \
-    | sort
-echo ""
-
-# --- Key files modified ---
-echo "## Key Files Modified"
-echo ""
-KEY_FILES=(
-    "backend/app.py"
-    "backend/models.py"
-    "backend/database.py"
-    "backend/shared/engine_routing.py"
-    "docker-compose.yml"
-    "Dockerfile"
-    "backend/requirements.txt"
-    "frontend-react/package.json"
-    "frontend-react/src/api/client.ts"
-    "frontend-react/src/types/api.ts"
-)
-for f in "${KEY_FILES[@]}"; do
-    if git diff --quiet "${BASE}..${HEAD_REF}" -- "$f" 2>/dev/null; then
-        :
-    else
-        echo "  MODIFIED: $f"
-    fi
-done
-echo ""
-
-# --- Full diff (optional) ---
-if [[ "$FULL_DIFF" == true ]]; then
-    echo "## Detailed Diff"
-    echo ""
-    git diff --stat "${BASE}..${HEAD_REF}" -- \
-        'backend/**/*.py' \
-        'frontend-react/src/**' \
-        'tests/**'
-    echo ""
-    git diff "${BASE}..${HEAD_REF}" -- \
-        'backend/**/*.py' \
-        'frontend-react/src/**' \
-        'tests/**'
-fi
-
-echo "================================================================"
-echo " To mark current HEAD as new sync point:"
-echo "   bash .dev/scripts/diff-summary.sh --mark"
-echo "================================================================"
+# 4. Quick stat footer
+echo "--- summary ---"
+git diff --shortstat "${BASE_REF}" -- . ':!tasks.db' ':!outputs/**' ':!uploads/**' || true
