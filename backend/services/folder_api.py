@@ -3,12 +3,17 @@ Folder management API router.
 Provides CRUD for folders (with sub-folder support) and task-to-folder assignment.
 """
 
+import io
 import logging
+import os
+import re
 import time
 import uuid
+import zipfile
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.database import SessionLocal, FolderRecord, TaskRecord
@@ -25,6 +30,41 @@ _NEED_TASK_IDS = "至少需要一個任務 ID"
 def set_folder_task_registry(registry: Dict[str, Any]):
     global _task_registry
     _task_registry = registry
+
+
+def resolve_or_create_subfolder(
+    session, *, root_id: str, sub_path: str, now: float, cache: Dict[str, str]
+) -> str:
+    """Resolve a slash-separated sub-path under root_id to a folder id,
+    creating any missing intermediate folders. Returns the leaf folder id."""
+    parent_id = root_id
+    accumulated = ""
+    for segment in [s for s in sub_path.split("/") if s.strip()]:
+        accumulated = f"{accumulated}/{segment}" if accumulated else segment
+        cached = cache.get(accumulated)
+        if cached is not None:
+            parent_id = cached
+            continue
+        existing = (
+            session.query(FolderRecord.id)
+            .filter(FolderRecord.parent_id == parent_id, FolderRecord.name == segment)
+            .first()
+        )
+        if existing is not None:
+            parent_id = existing[0]
+        else:
+            new_id = str(uuid.uuid4())
+            max_order = session.query(FolderRecord.sort_order).order_by(
+                FolderRecord.sort_order.desc()
+            ).limit(1).scalar() or 0.0
+            session.add(FolderRecord(
+                id=new_id, name=segment, parent_id=parent_id,
+                sort_order=max_order + 1.0, created_at=now, updated_at=now,
+            ))
+            session.flush()
+            parent_id = new_id
+        cache[accumulated] = parent_id
+    return parent_id
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +214,60 @@ def _get_descendant_ids(session, folder_id: str) -> List[str]:
     return ids
 
 
+_ILLEGAL_FILENAME_RE = re.compile(r'[\\/:*?"<>|]')
+
+
+def _safe_filename(name: str) -> str:
+    """Sanitize a string for safe use as a single filename component."""
+    if not name:
+        return ""
+    return _ILLEGAL_FILENAME_RE.sub("_", name).strip()
+
+
+def _unique_zip_path(used: set, sub_path: str, filename: str) -> str:
+    """Build a ZIP-internal path under sub_path, de-duplicating collisions."""
+    base, ext = os.path.splitext(filename)
+    candidate = filename
+    counter = 2
+    while True:
+        full = f"{sub_path}/{candidate}" if sub_path else candidate
+        if full not in used:
+            used.add(full)
+            return full
+        candidate = f"{base} ({counter}){ext}"
+        counter += 1
+
+
+def _build_relative_paths(rows, root_id: str) -> Dict[str, str]:
+    """Given (id, name, parent_id) rows, return {folder_id: relative_path}
+    for root_id and all its descendants. Root maps to "" (empty)."""
+    by_id = {fid: (name, parent_id) for fid, name, parent_id in rows}
+    paths: Dict[str, str] = {}
+
+    def resolve(fid: str):
+        if fid in paths:
+            return paths[fid]
+        if fid == root_id:
+            paths[fid] = ""
+            return ""
+        if fid not in by_id:
+            return None
+        name, parent_id = by_id[fid]
+        if parent_id is None:
+            return None
+        parent_path = resolve(parent_id)
+        if parent_path is None:
+            return None
+        segment = _safe_filename(name) or fid
+        paths[fid] = f"{parent_path}/{segment}" if parent_path else segment
+        return paths[fid]
+
+    for fid in by_id:
+        resolve(fid)
+    paths[root_id] = ""
+    return paths
+
+
 @router.delete("/{folder_id}")
 async def delete_folder(folder_id: str):
     """Delete a folder, all sub-folders, and all tasks within them."""
@@ -296,3 +390,94 @@ async def reorder_tasks_in_folder(folder_id: str, req: ReorderTasksRequest):
     except Exception as e:
         logger.error("Failed to reorder tasks in folder %s: %s", folder_id, e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Batch subtitle download
+# ---------------------------------------------------------------------------
+@router.get("/{folder_id}/download-subtitles")
+async def download_folder_subtitles(
+    folder_id: str,
+    format: str = "srt",
+    encoding: str = "utf-8",
+):
+    """Download all completed-task subtitles in a folder (recursively) as a ZIP."""
+    from urllib.parse import quote
+
+    from backend.services.subtitle_api import SubtitleService, get_tasks_storage
+    from backend.services.subtitle_converter import SubtitleConverter
+
+    converter = SubtitleConverter()
+    fmt = format.lower()
+    if not converter.is_format_supported(fmt):
+        raise HTTPException(status_code=400, detail=f"不支援的格式: {format}")
+
+    with SessionLocal() as session:
+        folder = session.get(FolderRecord, folder_id)
+        if folder is None:
+            raise HTTPException(status_code=404, detail=_FOLDER_NOT_FOUND)
+
+        folder_name = folder.name
+        all_ids = [folder_id] + _get_descendant_ids(session, folder_id)
+
+        rows = session.query(
+            FolderRecord.id, FolderRecord.name, FolderRecord.parent_id
+        ).filter(FolderRecord.id.in_(all_ids)).all()
+        rel_paths = _build_relative_paths(
+            [(r[0], r[1], r[2]) for r in rows], folder_id
+        )
+
+        task_rows = session.query(
+            TaskRecord.id, TaskRecord.folder_id
+        ).filter(
+            TaskRecord.folder_id.in_(all_ids),
+            TaskRecord.status == "completed",
+        ).all()
+
+    tasks = get_tasks_storage()
+    buffer = io.BytesIO()
+    used_paths: set = set()
+    written = 0
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for task_id, task_folder_id in task_rows:
+            task = tasks.get(task_id)
+            if task is None or not getattr(task, "result", None):
+                continue
+            try:
+                collection = SubtitleService.load_subtitle_data(task_id, tasks)
+                output_dir = task.result["output_dir"]
+                tmp_file = os.path.join(output_dir, f"{task_id}_folderdl.{fmt}")
+                result_path = converter.convert(collection, fmt, tmp_file, encoding)
+                with open(result_path, "rb") as fh:
+                    data = fh.read()
+                try:
+                    os.remove(result_path)
+                except OSError:
+                    pass
+            except Exception as exc:  # noqa: BLE001 - skip a single bad task
+                logger.warning("略過任務 %s 的字幕轉換: %s", task_id, exc)
+                continue
+
+            source_name = getattr(task, "source_name", None) or task_id
+            filename = f"{_safe_filename(source_name) or task_id}.{fmt}"
+            sub_path = rel_paths.get(task_folder_id, "")
+            zip_path = _unique_zip_path(used_paths, sub_path, filename)
+            zf.writestr(zip_path, data)
+            written += 1
+
+    if written == 0:
+        raise HTTPException(status_code=404, detail="此資料夾沒有可下載的字幕")
+
+    buffer.seek(0)
+    zip_filename = f"{_safe_filename(folder_name) or 'folder'}_subtitles.zip"
+
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename*=UTF-8''{quote(zip_filename)}"
+            )
+        },
+    )

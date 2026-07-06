@@ -125,6 +125,11 @@ export const api = {
     return `${BASE}/download/${taskId}/${fileType}`
   },
 
+  downloadFolderSubtitles(folderId: string, format: string, encoding = 'utf-8') {
+    const q = new URLSearchParams({ format, encoding })
+    return `${BASE}/api/folders/${folderId}/download-subtitles?${q.toString()}`
+  },
+
   retranscribe(taskId: string, data: RetranscribeRequest) {
     return request<{ retranscribe_task_id: string; message: string; status: string }>(
       `/api/subtitles/${taskId}/retranscribe`, { method: 'POST', body: JSON.stringify(data) }

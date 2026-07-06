@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect } from 'react'
 import {
   FolderOpen, FolderClosed, ChevronDown, ChevronRight,
-  MoreHorizontal, Pencil, Trash2, FolderPlus,
+  MoreHorizontal, Pencil, Trash2, FolderPlus, Download,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { useRenameFolder, useDeleteFolder, useCreateFolder } from '@/hooks/use-folders'
 import { cn } from '@/lib/utils'
+import { api } from '@/api/client'
+
+const SUBTITLE_FORMATS = ['srt', 'vtt', 'txt', 'ass', 'json'] as const
 
 interface FolderGroupHeaderProps {
   folderId: string | null
@@ -29,6 +32,7 @@ export function FolderGroupHeader({
   const [nameValue, setNameValue] = useState(folderName)
   const [creatingChild, setCreatingChild] = useState(false)
   const [childName, setChildName] = useState('')
+  const [showFormats, setShowFormats] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const childInputRef = useRef<HTMLInputElement>(null)
@@ -91,6 +95,13 @@ export function FolderGroupHeader({
     )
   }
 
+  const handleDownloadSubtitles = (format: string) => {
+    if (!folderId) return
+    setMenuOpen(false)
+    setShowFormats(false)
+    globalThis.location.href = api.downloadFolderSubtitles(folderId, format)
+  }
+
   return (
     <div>
       <div className={cn(
@@ -141,12 +152,39 @@ export function FolderGroupHeader({
             <button
               type="button"
               className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors cursor-pointer"
-              onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen) }}
+              onClick={(e) => { e.stopPropagation(); setShowFormats(false); setMenuOpen(!menuOpen) }}
             >
               <MoreHorizontal className="h-4 w-4 text-muted" />
             </button>
             {menuOpen && (
               <div className="absolute right-0 top-full mt-1 z-20 w-44 bg-surface dark:bg-surface-dark border border-border dark:border-border-dark rounded-lg shadow-lg py-1">
+                <div className="relative">
+                  <button
+                    type="button"
+                    className="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-text dark:text-text-dark hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
+                    onClick={() => setShowFormats((v) => !v)}
+                  >
+                    <span className="flex items-center gap-2">
+                      <Download className="h-3.5 w-3.5" />
+                      下載字幕
+                    </span>
+                    <ChevronRight className="h-3.5 w-3.5 text-muted" />
+                  </button>
+                  {showFormats && (
+                    <div className="mt-0.5 ml-6 border-l border-border dark:border-border-dark pl-2 py-0.5">
+                      {SUBTITLE_FORMATS.map((fmt) => (
+                        <button
+                          key={fmt}
+                          type="button"
+                          className="w-full text-left px-3 py-1.5 text-xs text-text dark:text-text-dark hover:bg-gray-100 dark:hover:bg-gray-800 rounded transition-colors cursor-pointer uppercase"
+                          onClick={() => handleDownloadSubtitles(fmt)}
+                        >
+                          {fmt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text dark:text-text-dark hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer"
