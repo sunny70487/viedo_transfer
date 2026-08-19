@@ -7,6 +7,7 @@ import { api } from '@/api/client'
 import type { LlmModel } from '@/types/api'
 
 const LLM_STORAGE_KEY = 'whisper_llm_settings'
+const BIAS_STORAGE_KEY = 'whisper_asr_bias'
 
 interface LlmSettings {
   llm_enhance: string
@@ -14,6 +15,25 @@ interface LlmSettings {
   llm_base_url: string
   llm_model: string
   llm_content_hint: string
+}
+
+interface BiasSettings {
+  hotwords: string
+  context: string
+}
+
+function loadBiasSettings(): BiasSettings {
+  try {
+    const raw = localStorage.getItem(BIAS_STORAGE_KEY)
+    if (raw) return JSON.parse(raw) as BiasSettings
+  } catch { /* ignore */ }
+  return { hotwords: '', context: '' }
+}
+
+function saveBiasSettings(s: BiasSettings) {
+  try {
+    localStorage.setItem(BIAS_STORAGE_KEY, JSON.stringify(s))
+  } catch { /* ignore */ }
 }
 
 function loadLlmSettings(): LlmSettings {
@@ -69,6 +89,14 @@ export function TranscriptionOptions({ values, onChange }: Readonly<Transcriptio
     return saved
   })
 
+  const [bias, setBias] = useState<BiasSettings>(() => {
+    const saved = loadBiasSettings()
+    for (const [k, v] of Object.entries(saved)) {
+      if (v && values[k] === undefined) onChange(k, v)
+    }
+    return saved
+  })
+
   const [models, setModels] = useState<LlmModel[]>([])
   const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
   const [modelError, setModelError] = useState('')
@@ -78,6 +106,15 @@ export function TranscriptionOptions({ values, onChange }: Readonly<Transcriptio
     setLlm((prev) => {
       const next = { ...prev, [key]: value }
       saveLlmSettings(next)
+      return next
+    })
+    onChange(key, value)
+  }, [onChange])
+
+  const updateBias = useCallback((key: keyof BiasSettings, value: string) => {
+    setBias((prev) => {
+      const next = { ...prev, [key]: value }
+      saveBiasSettings(next)
       return next
     })
     onChange(key, value)
@@ -116,6 +153,11 @@ export function TranscriptionOptions({ values, onChange }: Readonly<Transcriptio
   }, [llm.llm_api_key, llm.llm_base_url, fetchModels])
 
   const llmEnabled = llm.llm_enhance === 'true'
+  const termCount = bias.hotwords
+    .split(/[\n,、]/)
+    .map((t) => t.trim())
+    .filter(Boolean).length
+  const hasBias = termCount > 0 || bias.context.trim() !== ''
 
   return (
     <div className="space-y-3 mt-4">
@@ -134,8 +176,55 @@ export function TranscriptionOptions({ values, onChange }: Readonly<Transcriptio
         />
       </Section>
 
+      <Section title="辨識優化" defaultOpen={hasBias}>
+        <p className="text-xs text-muted dark:text-muted-dark mt-3">
+          直接影響辨識過程，免費且不需 API Key。提供專有名詞可避免術語被聽錯
+          （例如 shellcode 被辨識成「circle」）。僅 Qwen3-ASR 支援。
+        </p>
+        <div>
+          <label
+            htmlFor="hotwords"
+            className="block text-sm font-medium text-text dark:text-text-dark"
+          >
+            專有名詞 / 術語 (選填)
+          </label>
+          <textarea
+            id="hotwords"
+            className="w-full rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-3 py-2 text-sm text-text dark:text-text-dark placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y min-h-[60px]"
+            rows={3}
+            placeholder={'一行一個，或用逗號分隔\nshellcode\nVirtualAlloc\nKubernetes'}
+            value={bias.hotwords}
+            onChange={(e) => updateBias('hotwords', e.target.value)}
+          />
+          {termCount > 0 && (
+            <p className="text-xs text-muted dark:text-muted-dark mt-1">
+              已設定 {termCount} 個術語（會記住，下次自動帶入）
+            </p>
+          )}
+        </div>
+        <div>
+          <label
+            htmlFor="asr-context"
+            className="block text-sm font-medium text-text dark:text-text-dark"
+          >
+            情境描述 (選填)
+          </label>
+          <Input
+            id="asr-context"
+            type="text"
+            placeholder="例如：Windows 逆向工程課程錄音"
+            value={bias.context}
+            onChange={(e) => updateBias('context', e.target.value)}
+          />
+        </div>
+      </Section>
+
       <Section title="AI 字幕增強">
-        <div className="flex items-center gap-2 mt-3">
+        <p className="text-xs text-muted dark:text-muted-dark mt-3">
+          轉錄完成後再用 LLM 修正，需要 API Key 且會產生費用。
+          若只是要讓術語辨識正確，優先使用上方「辨識優化」。
+        </p>
+        <div className="flex items-center gap-2">
           <input
             type="checkbox"
             id="llm-enhance"

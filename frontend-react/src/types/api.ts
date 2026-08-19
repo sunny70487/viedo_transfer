@@ -148,6 +148,8 @@ export interface TranscriptionRequest {
   output_dir?: string
   speaker_diarization?: boolean
   num_speakers?: number
+  context?: string
+  hotwords?: string
   llm_enhance?: boolean
   llm_api_key?: string
   llm_base_url?: string
