@@ -188,6 +188,8 @@ class TranscriptionRequest(BaseModel):
     file_path: Optional[str] = None
     speaker_diarization: bool = False
     num_speakers: Optional[int] = None
+    context: Optional[str] = None
+    hotwords: Optional[str] = None
     llm_enhance: bool = False
     llm_api_key: Optional[str] = None
     llm_base_url: str = "https://api.openai.com/v1"
@@ -213,6 +215,8 @@ class BatchUrlRequest(BaseModel):
     segment_duration: int = 30
     speaker_diarization: bool = False
     num_speakers: Optional[int] = None
+    context: Optional[str] = None
+    hotwords: Optional[str] = None
     llm_enhance: bool = False
     llm_api_key: Optional[str] = None
     llm_base_url: str = "https://api.openai.com/v1"
@@ -406,6 +410,8 @@ def process_transcription(
             status_callback=status_callback,
             speaker_diarization=request.speaker_diarization,
             num_speakers=request.num_speakers,
+            context=request.context,
+            hotwords=request.hotwords,
         )
 
         if request.llm_enhance and request.llm_api_key:
@@ -565,6 +571,8 @@ async def transcribe_from_upload(
     output_dir: Optional[str] = Form(None),
     speaker_diarization: bool = Form(False),
     num_speakers: Optional[int] = Form(None),
+    context: Optional[str] = Form(None),
+    hotwords: Optional[str] = Form(None),
     llm_enhance: bool = Form(False),
     llm_api_key: Optional[str] = Form(None),
     llm_base_url: str = Form("https://api.openai.com/v1"),
@@ -616,6 +624,8 @@ async def transcribe_from_upload(
             output_dir=output_dir,
             speaker_diarization=speaker_diarization,
             num_speakers=num_speakers,
+            context=context,
+            hotwords=hotwords,
             llm_enhance=llm_enhance,
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
@@ -696,6 +706,8 @@ async def transcribe_batch_upload(
     output_dir: Optional[str] = Form(None),
     speaker_diarization: bool = Form(False),
     num_speakers: Optional[int] = Form(None),
+    context: Optional[str] = Form(None),
+    hotwords: Optional[str] = Form(None),
     llm_enhance: bool = Form(False),
     llm_api_key: Optional[str] = Form(None),
     llm_base_url: str = Form("https://api.openai.com/v1"),
@@ -761,6 +773,8 @@ async def transcribe_batch_upload(
             output_dir=output_dir,
             speaker_diarization=speaker_diarization,
             num_speakers=num_speakers,
+            context=context,
+            hotwords=hotwords,
             llm_enhance=llm_enhance,
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
@@ -803,6 +817,8 @@ async def transcribe_folder_upload(
     output_dir: Optional[str] = Form(None),
     speaker_diarization: bool = Form(False),
     num_speakers: Optional[int] = Form(None),
+    context: Optional[str] = Form(None),
+    hotwords: Optional[str] = Form(None),
     llm_enhance: bool = Form(False),
     llm_api_key: Optional[str] = Form(None),
     llm_base_url: str = Form("https://api.openai.com/v1"),
@@ -928,6 +944,8 @@ async def transcribe_folder_upload(
             output_dir=output_dir,
             speaker_diarization=speaker_diarization,
             num_speakers=num_speakers,
+            context=context,
+            hotwords=hotwords,
             llm_enhance=llm_enhance,
             llm_api_key=llm_api_key,
             llm_base_url=llm_base_url,
