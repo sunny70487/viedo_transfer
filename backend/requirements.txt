@@ -36,6 +36,13 @@ pydub>=0.25.1
 yt-dlp>=2023.3.4
 librosa>=0.10.0
 
+# FireRedVAD 語音活動檢測（在靜音處切段，避免切斷字詞）
+# 必須用 --no-deps 安裝：其 pyproject.toml 釘死 torch==2.10.0 / transformers==5.1.0，
+# 直接安裝會破壞上面的 torch 與 qwen-asr 環境。
+# pip install --no-deps git+https://github.com/FireRedTeam/FireRedASR2S.git
+kaldi_native_fbank>=1.15
+kaldiio>=2.18.0
+
 # Speaker diarization (說話者辨識)
 pyannote.audio>=3.1.0
 speechbrain>=1.0.0

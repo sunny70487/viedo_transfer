@@ -73,7 +73,16 @@ python -m venv .venv
 source .venv/bin/activate
 
 pip install -r backend/requirements.txt
+
+# FireRedVAD（語音活動檢測）— 必須加 --no-deps，否則會覆蓋 torch / transformers
+pip install --no-deps git+https://github.com/FireRedTeam/FireRedASR2S.git
+
+# 下載 FireRedVAD 模型權重（約 2.4 MB）
+python -c "from modelscope import snapshot_download; snapshot_download('xukaituo/FireRedVAD', local_dir='./pretrained_models/FireRedVAD')"
 ```
+
+> VAD 模型路徑預設為 `pretrained_models/FireRedVAD/VAD`，可用環境變數 `FIRERED_VAD_MODEL_DIR` 覆寫。
+> 若模型或套件不存在，系統會自動退回固定間隔分割，不會中斷轉錄。
 
 ### 開發驗證基線
 
@@ -158,7 +167,7 @@ docker compose up -d
 - **運行設備**：自動 / CPU / GPU
 - **計算類型**：float16, int8 等
 - **束搜索大小**：影響準確性和速度
-- **語音活動檢測（VAD）**：過濾無聲片段
+- **語音活動檢測（VAD）**：使用 FireRedVAD 在靜音處切段（需搭配「音頻分割」），避免固定 30 秒硬切造成字詞被切斷、重複辨識
 - **詞級時間戳**：生成逐詞時間標記
 - **音頻分割**：將長音頻分割為小片段處理
 
