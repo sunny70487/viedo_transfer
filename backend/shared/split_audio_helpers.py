@@ -8,6 +8,8 @@ from pathlib import Path
 
 from pydub import AudioSegment
 
+from backend.shared.firered_vad import detect_speech_segments, plan_vad_chunks
+
 
 def parse_audio_duration(stderr_text):
     duration_match = re.search(r"Duration: (\d{2}):(\d{2}):(\d{2}\.\d+)", stderr_text)
@@ -143,3 +145,104 @@ def split_audio(
         print(f"分割完成! 共生成 {len(segment_files)} 個片段。")
 
     return segment_files, temp_dir
+
+
+def _extract_span(audio_path, start_s, end_s, out_path):
+    ffmpeg_cmd = [
+        "ffmpeg", "-y",
+        "-ss", f"{start_s:.3f}",
+        "-i", audio_path,
+        "-t", f"{end_s - start_s:.3f}",
+        "-vn", "-c:a", "flac", "-threads", "2",
+        out_path,
+    ]
+    try:
+        result = subprocess.run(ffmpeg_cmd, capture_output=True)
+        if result.returncode != 0:
+            print(
+                f"擷取語音片段 {start_s:.2f}-{end_s:.2f}s 失敗: "
+                f"返回碼 {result.returncode}"
+            )
+            return None
+        return out_path
+    except Exception as exc:
+        print(f"擷取語音片段 {start_s:.2f}-{end_s:.2f}s 失敗: {exc}")
+        return None
+
+
+def split_audio_by_vad(
+    audio_path,
+    max_duration=30,
+    output_dir=None,
+    verbose=True,
+    max_workers=None,
+):
+    """
+    Split audio at VAD-detected silence boundaries.
+
+    Returns ``(segments, temp_dir, used_vad)`` where ``segments`` is a list of
+    ``(file_path, start_offset_s)`` pairs. Returning the true start offset with
+    each file is what keeps timestamps correct: callers must not assume the
+    Nth chunk begins at ``N * max_duration``.
+
+    Falls back to fixed-interval :func:`split_audio` when VAD is unavailable or
+    finds no speech, in which case ``used_vad`` is ``False``.
+    """
+    speech_segments = detect_speech_segments(audio_path)
+
+    if not speech_segments:
+        if verbose:
+            print("VAD 不可用或未偵測到語音，改用固定間隔分割")
+        segment_files, temp_dir = split_audio(
+            audio_path,
+            segment_duration=max_duration,
+            output_dir=output_dir,
+            verbose=verbose,
+            max_workers=max_workers,
+        )
+        segments = [
+            (path, float(index * max_duration))
+            for index, path in enumerate(segment_files)
+        ]
+        return segments, temp_dir, False
+
+    chunks = plan_vad_chunks(speech_segments, max_duration=float(max_duration))
+
+    if output_dir is None:
+        temp_dir = tempfile.mkdtemp()
+        output_dir = temp_dir
+    else:
+        temp_dir = None
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    speech_total = sum(end - start for start, end in speech_segments)
+    if verbose:
+        print(
+            f"VAD 偵測到 {len(speech_segments)} 段語音（共 {speech_total:.1f} 秒），"
+            f"合併為 {len(chunks)} 個片段"
+        )
+
+    if max_workers is None:
+        max_workers = min(mp.cpu_count(), 4)
+
+    def extract(index):
+        start_s, end_s = chunks[index]
+        out_path = os.path.join(output_dir, f"vad_segment_{index:04d}.flac")
+        produced = _extract_span(audio_path, start_s, end_s, out_path)
+        if produced is None:
+            return None
+        return produced, start_s
+
+    results = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(extract, i): i for i in range(len(chunks))}
+        for future in as_completed(futures):
+            index = futures[future]
+            results[index] = future.result()
+
+    segments = [item for item in results if item is not None]
+
+    if verbose:
+        print(f"VAD 分割完成! 共生成 {len(segments)} 個片段。")
+
+    return segments, temp_dir, True

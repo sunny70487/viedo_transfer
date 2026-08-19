@@ -27,7 +27,7 @@ from backend.shared.text_processing import (
     split_long_segments as _split_long_segments,
     _join_words_text,
 )
-from backend.shared.split_audio_helpers import split_audio
+from backend.shared.split_audio_helpers import split_audio, split_audio_by_vad
 from backend.shared.transcribe_helpers import format_timestamp
 from backend.shared.transcription_pipeline import (
     resolve_device,
@@ -376,7 +376,7 @@ def transcribe_audio(
         language (str): 語言代碼 (如 'zh', 'en')，None 表示自動檢測
         task (str): 任務類型 (transcribe, translate)
         beam_size (int): 束搜索大小 — 保留用於 API 兼容性
-        vad_filter (bool): 是否使用語音活動檢測過濾 — 保留用於 API 兼容性
+        vad_filter (bool): 啟用 FireRedVAD，在靜音處切段（需搭配 split_segments）
         vad_parameters (dict): VAD 參數設置 — 保留用於 API 兼容性
         word_timestamps (bool): 是否生成詞級時間戳
         output_dir (str): 輸出目錄，None 表示與音檔文件相同目錄
@@ -438,21 +438,36 @@ def transcribe_audio(
         if verbose:
             print(f"分割音檔為每 {segment_duration} 秒的片段...")
 
-        segment_files, temp_dir = split_audio(
-            audio_path,
-            segment_duration=segment_duration,
-            output_dir=None,
-            verbose=verbose,
-            max_workers=max_workers,
-        )
+        if vad_filter:
+            segment_files, temp_dir, used_vad = split_audio_by_vad(
+                audio_path,
+                max_duration=segment_duration,
+                output_dir=None,
+                verbose=verbose,
+                max_workers=max_workers,
+            )
+        else:
+            raw_files, temp_dir = split_audio(
+                audio_path,
+                segment_duration=segment_duration,
+                output_dir=None,
+                verbose=verbose,
+                max_workers=max_workers,
+            )
+            segment_files = [
+                (path, float(index * segment_duration))
+                for index, path in enumerate(raw_files)
+            ]
+            used_vad = False
 
         if verbose:
-            print(f"共分割為 {len(segment_files)} 個片段")
+            mode = "VAD 語音邊界" if used_vad else "固定間隔"
+            print(f"共分割為 {len(segment_files)} 個片段（{mode}）")
 
         segments_txt_path = base_output_path / f"{base_filename}_segments.txt"
         with open(segments_txt_path, "w", encoding="utf-8") as segments_file:
             total_segs = len(segment_files)
-            for i, segment_file in enumerate(segment_files):
+            for i, (segment_file, segment_offset) in enumerate(segment_files):
                 if verbose:
                     print(f"正在轉錄片段 {i + 1}/{total_segs}: {segment_file}")
 
@@ -475,8 +490,9 @@ def transcribe_audio(
                 # Qwen3-ASR returns a list of results; process each
                 result_list = results if isinstance(results, list) else [results]
 
-                # Parse results with time offset
-                time_offset = float(i * segment_duration)
+                # Offset comes from the splitter, not from the loop index, so a
+                # dropped or variable-length chunk cannot shift later timestamps.
+                time_offset = segment_offset
 
                 for r in result_list:
                     seg_segments, seg_words, seg_text, seg_lang = _parse_qwen3_result(
