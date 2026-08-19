@@ -230,6 +230,8 @@ class RetranscribeService:
             beam_size = model_settings.get("beam_size", 5)
             vad_filter = model_settings.get("vad_filter", True)
             word_timestamps = model_settings.get("word_timestamps", True)
+            context = model_settings.get("context", None)
+            hotwords = model_settings.get("hotwords", None)
 
             # 創建臨時輸出目錄
             temp_output_dir = os.path.join(
@@ -252,6 +254,8 @@ class RetranscribeService:
                 output_format="json",
                 verbose=False,
                 show_in_terminal=False,
+                context=context,
+                hotwords=hotwords,
             )
 
             # 讀取 JSON 結果

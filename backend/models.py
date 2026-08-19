@@ -280,6 +280,8 @@ class RetranscribeRequest(BaseModel):
             "beam_size",
             "vad_filter",
             "word_timestamps",
+            "context",
+            "hotwords",
         }
 
         invalid_keys = set(v.keys()) - valid_keys
