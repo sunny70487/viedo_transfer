@@ -27,6 +27,7 @@ from backend.shared.text_processing import (
     split_long_segments as _split_long_segments,
     _join_words_text,
 )
+from backend.shared.asr_context import build_asr_context
 from backend.shared.split_audio_helpers import split_audio, split_audio_by_vad
 from backend.shared.transcribe_helpers import format_timestamp
 from backend.shared.transcription_pipeline import (
@@ -364,6 +365,8 @@ def transcribe_audio(
     status_callback=None,
     speaker_diarization=False,
     num_speakers=None,
+    context=None,
+    hotwords=None,
 ) -> dict:
     """
     使用 Qwen3-ASR 將音檔轉錄為文本
@@ -389,6 +392,8 @@ def transcribe_audio(
         status_callback (callable): 狀態回調函數
         speaker_diarization (bool): 是否啟用說話者辨識
         num_speakers (int): 說話者人數（None 表示自動偵測）
+        context (str): 音檔情境描述，用於偏置辨識結果
+        hotwords (list|str): 專有名詞/術語清單，提高這些詞的辨識正確率
 
     返回:
         dict: 輸出文件路徑字典
@@ -422,6 +427,10 @@ def transcribe_audio(
 
     # Resolve language for Qwen3-ASR
     lang_name = _resolve_language(language)
+
+    asr_context = build_asr_context(context=context, hotwords=hotwords)
+    if asr_context and verbose:
+        print(f"啟用辨識偏置 context（{len(asr_context)} 字元）")
 
     base_output_path, base_filename = init_output_paths(audio_path, output_dir)
     bufs = init_buffers()
@@ -483,6 +492,7 @@ def transcribe_audio(
                 # Run Qwen3-ASR on this segment
                 results = model.transcribe(
                     audio=segment_file,
+                    context=asr_context,
                     language=lang_name,
                     return_time_stamps=word_timestamps,
                 )
@@ -616,6 +626,7 @@ def transcribe_audio(
         # Run Qwen3-ASR
         results = model.transcribe(
             audio=audio_path,
+            context=asr_context,
             language=lang_name,
             return_time_stamps=word_timestamps,
         )
