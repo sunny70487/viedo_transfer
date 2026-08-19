@@ -24,7 +24,10 @@ def next_progress_state(
     is_split_mode,
 ):
     fraction = (step + 1) / total_steps
-    next_progress = min(target_progress, start_progress + fraction * (target_progress - start_progress))
+    next_progress = min(
+        target_progress,
+        start_progress + fraction * (target_progress - start_progress),
+    )
 
     if is_split_mode:
         completed_segments = step + 1
