@@ -6,6 +6,7 @@
 提供字幕 CRUD 操作的 RESTful API
 """
 
+import glob
 import os
 import json
 import time
@@ -397,6 +398,19 @@ def _read_task_output(task: Any, filename: str, missing_detail: str) -> str:
         raise HTTPException(status_code=404, detail=missing_detail)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def _clear_concept_animations(task: Any, task_id: str) -> None:
+    """Delete SVG animations tied to a previous version of the notes."""
+    output_dir = _resolve_task_output_dir(task)
+    if not output_dir:
+        return
+    pattern = os.path.join(output_dir, f"{glob.escape(task_id)}_anim_*.svg")
+    for path in glob.glob(pattern):
+        try:
+            os.remove(path)
+        except OSError as e:
+            logger.warning("Could not remove %s: %s", path, e)
 
 
 # API 端點定義
@@ -1116,24 +1130,34 @@ def summarize_subtitles_endpoint(
     return notes
 
 
+def _sse(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload)}\n\n"
+
+
 @router.post("/{task_id}/generate-notes")
-async def generate_notes_endpoint(
+def generate_notes_endpoint(
     task_id: str = FastAPIPath(..., description="任務 ID"),
     req: SummarizeRequest = ...,
 ):
-    """Stream an illustrated Markdown study note (note-crafter style) via SSE."""
+    """Stream an illustrated Markdown study note (note-crafter style) via SSE.
+
+    The note is persisted only after the whole stream succeeds; an error or
+    client disconnect leaves the previously saved note and animations intact.
+    """
     from starlette.responses import StreamingResponse
 
     tasks = get_tasks_storage()
     subtitle_data = SubtitleService.load_subtitle_data(task_id, tasks)
+    task = tasks[task_id]
 
     segments = [
         {"start": s.start_time, "end": s.end_time, "text": s.text}
         for s in subtitle_data.subtitles
     ]
 
-    async def generate():
+    def generate():
         from backend.shared.llm_postprocess import generate_notes as _gen
+        parts: List[str] = []
         try:
             for piece in _gen(
                 segments,
@@ -1142,17 +1166,37 @@ async def generate_notes_endpoint(
                 model=req.model,
                 content_hint=req.content_hint,
             ):
-                yield f"data: {json.dumps({'type': 'delta', 'text': piece})}\n\n"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                parts.append(piece)
+                yield _sse({"type": "delta", "text": piece})
         except RuntimeError as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            yield _sse({"type": "error", "message": str(e)})
+            return
         except Exception as e:
             logger.error(
                 "generate-notes failed for %s: %s", task_id, e, exc_info=True
             )
-            yield f"data: {json.dumps({'type': 'error', 'message': '筆記生成失敗'})}\n\n"
+            yield _sse({"type": "error", "message": "筆記生成失敗"})
+            return
+
+        markdown = "".join(parts)
+        if markdown.strip():
+            _write_task_output(task, f"{task_id}_study_notes.md", markdown)
+            _clear_concept_animations(task, task_id)
+        yield _sse({"type": "done"})
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.get("/{task_id}/study-notes")
+def get_study_notes(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+):
+    """Return the last fully generated study note as Markdown."""
+    task = _require_task(task_id)
+    markdown = _read_task_output(
+        task, f"{task_id}_study_notes.md", "尚未產生筆記"
+    )
+    return {"markdown": markdown}
 
 
 @router.get("/{task_id}/notes")
