@@ -290,11 +290,12 @@ export const api = {
     base_url: string
     model: string
     content_hint?: string
-  }): AsyncGenerator<{ type: string; text?: string; message?: string }> {
+  }, signal?: AbortSignal): AsyncGenerator<{ type: string; text?: string; message?: string }> {
     const res = await fetch(`${BASE}/api/subtitles/${taskId}/generate-notes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
+      signal,
     })
     if (!res.ok || !res.body) {
       const body = await res.json().catch(() => ({}))
@@ -333,5 +334,16 @@ export const api = {
       throw new Error(body.detail || `Request failed: ${res.status}`)
     }
     return res.json()
+  },
+
+  async getStudyNotes(taskId: string): Promise<string | null> {
+    const res = await fetch(`${BASE}/api/subtitles/${taskId}/study-notes`)
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Request failed: ${res.status}`)
+    }
+    const body = (await res.json()) as { markdown: string }
+    return body.markdown
   },
 }

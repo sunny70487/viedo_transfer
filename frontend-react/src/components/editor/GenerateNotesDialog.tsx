@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/Button'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toast-store'
 import { loadLlmSettings, saveLlmSettings } from '@/hooks/use-llm-settings'
+import { NoteRenderer } from '@/components/editor/notes/NoteRenderer'
 
 interface GenerateNotesDialogProps {
   open: boolean
@@ -21,7 +22,7 @@ export function GenerateNotesDialog({
   const [generating, setGenerating] = useState(false)
   const [markdown, setMarkdown] = useState('')
   const [copied, setCopied] = useState(false)
-  const abortRef = useRef(false)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -29,7 +30,15 @@ export function GenerateNotesDialog({
     setContentHint(s.content_hint)
     setApiKeySet(Boolean(s.api_key))
     setMarkdown('')
-  }, [open])
+    let cancelled = false
+    api.getStudyNotes(taskId)
+      .then((md) => { if (!cancelled && md) setMarkdown(md) })
+      .catch(() => { /* no saved note yet */ })
+    return () => {
+      cancelled = true
+      abortRef.current?.abort()
+    }
+  }, [open, taskId])
 
   const handleGenerate = useCallback(async () => {
     const s = loadLlmSettings()
@@ -39,7 +48,8 @@ export function GenerateNotesDialog({
     saveLlmSettings({ content_hint: contentHint })
     setGenerating(true)
     setMarkdown('')
-    abortRef.current = false
+    const controller = new AbortController()
+    abortRef.current = controller
 
     try {
       const stream = api.generateNotesStream(taskId, {
@@ -47,9 +57,8 @@ export function GenerateNotesDialog({
         base_url: s.base_url,
         model: s.model,
         content_hint: contentHint || undefined,
-      })
+      }, controller.signal)
       for await (const event of stream) {
-        if (abortRef.current) break
         if (event.type === 'delta' && event.text) {
           setMarkdown((prev) => prev + event.text)
         } else if (event.type === 'error') {
@@ -57,8 +66,11 @@ export function GenerateNotesDialog({
         }
       }
     } catch (e) {
-      toast('error', `筆記生成失敗: ${(e as Error).message}`)
+      if ((e as Error).name !== 'AbortError') {
+        toast('error', `筆記生成失敗: ${(e as Error).message}`)
+      }
     } finally {
+      abortRef.current = null
       setGenerating(false)
     }
   }, [taskId, contentHint, hasSubtitles])
@@ -118,10 +130,10 @@ export function GenerateNotesDialog({
         )}
 
         {(markdown || generating) && (
-          <pre className="max-h-[55vh] overflow-auto rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark p-3 text-xs leading-relaxed text-text dark:text-text-dark whitespace-pre-wrap break-words font-mono">
-            {markdown}
+          <div className="max-h-[60vh] overflow-auto rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
+            <NoteRenderer markdown={markdown} streaming={generating} />
             {generating && <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse align-middle ml-0.5" />}
-          </pre>
+          </div>
         )}
 
         <div className="flex justify-end gap-2 pt-2">
@@ -138,7 +150,7 @@ export function GenerateNotesDialog({
             </>
           )}
           {generating ? (
-            <Button variant="outline" size="sm" onClick={() => { abortRef.current = true }}>
+            <Button variant="outline" size="sm" onClick={() => abortRef.current?.abort()}>
               <Square className="h-4 w-4" />
               停止
             </Button>
