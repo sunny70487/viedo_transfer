@@ -75,6 +75,13 @@ export const api = {
     return request<{ message: string }>(`/tasks/${taskId}`, { method: 'DELETE' })
   },
 
+  setTaskWatched(taskId: string, watched: boolean) {
+    return request<{ id: string; watched: boolean }>(`/tasks/${taskId}/watched`, {
+      method: 'PUT',
+      body: JSON.stringify({ watched }),
+    })
+  },
+
   deleteAllFailedTasks() {
     return request<{ message: string; deleted_count: number }>('/tasks/failed', { method: 'DELETE' })
   },
@@ -259,6 +266,39 @@ export const api = {
           ? body.detail
           : JSON.stringify(body.detail)
       }
+      throw new Error(msg)
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          yield JSON.parse(line.slice(6))
+        }
+      }
+    }
+  },
+
+  async *generateNotesStream(taskId: string, data: {
+    api_key: string
+    base_url: string
+    model: string
+    content_hint?: string
+  }): AsyncGenerator<{ type: string; text?: string; message?: string }> {
+    const res = await fetch(`${BASE}/api/subtitles/${taskId}/generate-notes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok || !res.body) {
+      const body = await res.json().catch(() => ({}))
+      const msg = typeof body.detail === 'string' ? body.detail : `Request failed: ${res.status}`
       throw new Error(msg)
     }
     const reader = res.body.getReader()

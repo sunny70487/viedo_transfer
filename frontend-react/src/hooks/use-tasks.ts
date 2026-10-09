@@ -24,6 +24,20 @@ export function useDeleteTask() {
   })
 }
 
+export function useSetTaskWatched() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ taskId, watched }: { taskId: string; watched: boolean }) =>
+      api.setTaskWatched(taskId, watched),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+    },
+    onError: (err: Error) => {
+      toast('error', `更新已看過狀態失敗: ${err.message}`)
+    },
+  })
+}
+
 export function useDeleteAllFailedTasks() {
   const qc = useQueryClient()
   return useMutation({

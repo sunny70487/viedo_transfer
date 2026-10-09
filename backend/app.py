@@ -165,6 +165,7 @@ class Task(BaseModel):
     batch_id: Optional[str] = None
     folder_id: Optional[str] = None
     sort_order: float = 0.0
+    watched: bool = False
     partial_segments: Optional[List[Dict[str, Any]]] = None
     source_file_path: Optional[str] = None
 

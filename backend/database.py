@@ -10,6 +10,7 @@ from pathlib import Path
 
 from sqlalchemy import (
     create_engine,
+    Boolean,
     Column,
     String,
     Float,
@@ -82,6 +83,7 @@ class TaskRecord(Base):
     batch_id = Column(String(36), nullable=True, index=True)
     folder_id = Column(String(36), nullable=True, index=True)
     sort_order = Column(Float, nullable=False, default=0.0)
+    watched = Column(Boolean, nullable=False, default=False)
 
     def to_dict(self):
         return {
@@ -97,6 +99,7 @@ class TaskRecord(Base):
             "batch_id": self.batch_id,
             "folder_id": self.folder_id,
             "sort_order": self.sort_order,
+            "watched": bool(self.watched),
         }
 
 
@@ -136,6 +139,12 @@ def _run_migrations():
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE tasks ADD COLUMN sort_order FLOAT DEFAULT 0.0"))
             logger.info("Migration: added sort_order column to tasks table")
+        if "watched" not in task_cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    "ALTER TABLE tasks ADD COLUMN watched BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
+            logger.info("Migration: added watched column to tasks table")
 
 
 def init_db():

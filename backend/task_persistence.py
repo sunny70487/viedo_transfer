@@ -45,6 +45,7 @@ class TaskPersistence:
                 record.batch_id = task_data.get("batch_id")
                 record.folder_id = task_data.get("folder_id")
                 record.sort_order = task_data.get("sort_order", 0.0)
+                record.watched = bool(task_data.get("watched", False))
                 session.commit()
             logger.debug(f"任務 {task_id} 已保存到資料庫")
             return True

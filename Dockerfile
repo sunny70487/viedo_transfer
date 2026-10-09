@@ -43,6 +43,12 @@ RUN grep -v "pywin32" requirements.txt > /tmp/requirements_linux.txt \
     && pip install --no-cache-dir -r /tmp/requirements_linux.txt \
     && rm /tmp/requirements_linux.txt
 
+# FireRedVAD（語音活動檢測）；--no-deps 是必要的：其 pyproject.toml 釘死
+# torch==2.10.0 / transformers==5.1.0，會覆蓋下方的 CUDA torch 並破壞 qwen-asr。
+# 模型權重不打包進 image，首次使用時自動下載至 /app/models（volume）。
+RUN pip install --no-cache-dir --no-deps \
+        git+https://github.com/FireRedTeam/FireRedASR2S.git
+
 # 強制覆蓋為 CUDA 版 PyTorch（pip 預設裝的是 CPU 版，其他套件的依賴也會拉 CPU 版）
 RUN pip install --no-cache-dir --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 

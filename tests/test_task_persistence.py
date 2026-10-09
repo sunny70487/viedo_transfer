@@ -40,6 +40,46 @@ def test_save_task_round_trip(tmp_path, monkeypatch):
     assert loaded["task-1"]["result"] == {"files": {"json": "task-1.json"}}
 
 
+def test_save_task_persists_watched_flag(tmp_path, monkeypatch):
+    test_session = _make_test_session(tmp_path)
+    monkeypatch.setattr(task_persistence_module, "SessionLocal", test_session)
+    persistence = task_persistence_module.TaskPersistence
+
+    persistence.save_task("task-1", {"status": "completed", "start_time": 1.0})
+    assert persistence.load_all_tasks()["task-1"]["watched"] is False
+
+    persistence.save_task(
+        "task-1", {"status": "completed", "start_time": 1.0, "watched": True}
+    )
+    assert persistence.load_all_tasks()["task-1"]["watched"] is True
+
+
+def test_run_migrations_adds_watched_column_to_existing_tasks_table(
+    tmp_path, monkeypatch
+):
+    from backend import database
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.db'}")
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE tasks (id VARCHAR(36) PRIMARY KEY, status VARCHAR(20),"
+            " start_time FLOAT, folder_id VARCHAR(36), sort_order FLOAT)"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO tasks (id, status, start_time) VALUES ('old', 'completed', 1)"
+        )
+    monkeypatch.setattr(database, "engine", engine)
+
+    database._run_migrations()
+    database._run_migrations()  # idempotent
+
+    with engine.connect() as conn:
+        value = conn.exec_driver_sql(
+            "SELECT watched FROM tasks WHERE id = 'old'"
+        ).scalar()
+    assert not value
+
+
 def test_scan_and_rebuild_tasks_restores_completed_task_from_outputs(
     tmp_path, monkeypatch
 ):

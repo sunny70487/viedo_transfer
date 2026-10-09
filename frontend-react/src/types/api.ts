@@ -66,6 +66,7 @@ export interface Task {
   batch_id?: string
   folder_id?: string
   sort_order?: number
+  watched?: boolean
   partial_segments?: PartialSegment[]
   source_file_path?: string
 }

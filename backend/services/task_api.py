@@ -1,13 +1,23 @@
 import asyncio
 import json
+import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
+from backend.database import SessionLocal, TaskRecord
 from backend.task_persistence import TaskPersistence
 
+logger = logging.getLogger("task_api")
+
 router = APIRouter(tags=["tasks"])
+
+
+class SetWatchedRequest(BaseModel):
+    watched: bool
+
 
 _task_registry: Optional[Dict[str, Any]] = None
 
@@ -95,6 +105,29 @@ async def delete_task(task_id: str):
     del tasks[task_id]
     TaskPersistence.delete_task(task_id)
     return {"message": "任務已取消並刪除" if was_active else "任務已刪除"}
+
+
+@router.put("/tasks/{task_id}/watched")
+async def set_task_watched(task_id: str, req: SetWatchedRequest):
+    """Mark a task as watched or unwatched."""
+    tasks = get_task_registry()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    try:
+        with SessionLocal() as session:
+            record = session.get(TaskRecord, task_id)
+            if record is not None:
+                record.watched = req.watched
+                session.commit()
+    except Exception as e:
+        logger.error(
+            "Failed to set watched on task %s: %s", task_id, e, exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="無法更新已看過狀態")
+
+    tasks[task_id].watched = req.watched
+    return {"id": task_id, "watched": req.watched}
 
 
 @router.get("/tasks/batch/{batch_id}")

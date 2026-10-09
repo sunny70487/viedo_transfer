@@ -34,7 +34,9 @@ ffmpeg-python>=0.2.0
 soundfile>=0.10.3
 pydub>=0.25.1
 yt-dlp>=2023.3.4
-librosa>=0.10.0
+librosa>=0.10.1
+# numba 下限：舊版上限為 <3.11，會在 Python 3.11 上嘗試從原始碼編譯而失敗；0.59+ 才支援 3.11/3.12
+numba>=0.59.0
 
 # FireRedVAD 語音活動檢測（在靜音處切段，避免切斷字詞）
 # 必須用 --no-deps 安裝：其 pyproject.toml 釘死 torch==2.10.0 / transformers==5.1.0，

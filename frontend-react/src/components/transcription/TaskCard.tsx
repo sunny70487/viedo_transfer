@@ -1,10 +1,10 @@
 import { useState, useMemo } from 'react'
-import { ChevronDown, Trash2, FileText, Download, FolderInput, Eye } from 'lucide-react'
+import { ChevronDown, Trash2, FileText, Download, FolderInput, Eye, CircleCheck, Circle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
-import { useDeleteTask } from '@/hooks/use-tasks'
+import { useDeleteTask, useSetTaskWatched } from '@/hooks/use-tasks'
 import { useFolders, useMoveTasksToFolder, useRemoveTasksFromFolder } from '@/hooks/use-folders'
 import { useTaskStream } from '@/hooks/use-task-stream'
 import { api } from '@/api/client'
@@ -48,6 +48,7 @@ function statusVariant(status: string): 'default' | 'primary' | 'success' | 'dan
 export function TaskCard({ task }: Readonly<TaskCardProps>) {
   const [expanded, setExpanded] = useState(false)
   const deleteMutation = useDeleteTask()
+  const watchedMutation = useSetTaskWatched()
   const { data: folders = [] } = useFolders()
   const folderTree = useMemo(() => buildFlatTree(folders), [folders])
   const moveMutation = useMoveTasksToFolder()
@@ -58,6 +59,7 @@ export function TaskCard({ task }: Readonly<TaskCardProps>) {
   useTaskStream(task.id, isActive)
   const isCompleted = task.status === 'completed'
   const isFailed = task.status === 'failed'
+  const isWatched = task.watched === true
 
   const elapsed = task.start_time
     ? formatDuration(((task.end_time || Date.now() / 1000) - task.start_time))
@@ -76,6 +78,7 @@ export function TaskCard({ task }: Readonly<TaskCardProps>) {
   return (
     <div className={cn(
       'rounded-lg border transition-colors',
+      isWatched && 'opacity-60 hover:opacity-100',
       isActive ? 'border-primary/30 bg-primary/5 dark:bg-primary/5' :
       isCompleted ? 'border-green-200 dark:border-green-900/40' :
       isFailed ? 'border-red-200 dark:border-red-900/40' :
@@ -88,6 +91,7 @@ export function TaskCard({ task }: Readonly<TaskCardProps>) {
               <Badge variant={statusVariant(task.status)}>
                 {statusInfo?.label ?? task.status}
               </Badge>
+              {isWatched && <Badge variant="info">已看過</Badge>}
               {task.source_name && (
                 <span className="text-sm font-medium text-text dark:text-text-dark truncate">{task.source_name}</span>
               )}
@@ -97,6 +101,21 @@ export function TaskCard({ task }: Readonly<TaskCardProps>) {
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {isCompleted && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => watchedMutation.mutate({ taskId: task.id, watched: !isWatched })}
+                loading={watchedMutation.isPending}
+                title={isWatched ? '取消已看過' : '標記已看過'}
+                aria-label={isWatched ? '取消已看過' : '標記已看過'}
+                aria-pressed={isWatched}
+              >
+                {isWatched
+                  ? <CircleCheck className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                  : <Circle className="h-4 w-4 text-muted dark:text-muted-dark" />}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

@@ -79,3 +79,62 @@ def test_delete_task_removes_completed_task_and_calls_persistence(monkeypatch):
     assert response.json() == {"message": "任務已刪除"}
     assert deleted["task_id"] == "task-1"
     assert "task-1" not in tasks
+
+
+def _watched_client(tmp_path, monkeypatch, tasks):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.database import Base, TaskRecord
+
+    task_api = _load_task_api_module()
+    engine = create_engine(f"sqlite:///{tmp_path / 'watched.db'}")
+    Base.metadata.create_all(bind=engine)
+    session_factory = sessionmaker(bind=engine)
+    with session_factory() as session:
+        for tid in tasks:
+            session.add(TaskRecord(id=tid, status="completed", start_time=1.0))
+        session.commit()
+    monkeypatch.setattr(task_api, "SessionLocal", session_factory)
+    task_api.set_task_registry(tasks)
+
+    app = FastAPI()
+    app.include_router(task_api.router)
+    return TestClient(app), session_factory, TaskRecord
+
+
+def test_set_task_watched_updates_registry_and_database(tmp_path, monkeypatch):
+    tasks = {"task-1": SimpleNamespace(status="completed", watched=False)}
+    client, session_factory, task_record = _watched_client(
+        tmp_path, monkeypatch, tasks
+    )
+
+    response = client.put("/tasks/task-1/watched", json={"watched": True})
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "task-1", "watched": True}
+    assert tasks["task-1"].watched is True
+    with session_factory() as session:
+        assert session.get(task_record, "task-1").watched is True
+
+    response = client.put("/tasks/task-1/watched", json={"watched": False})
+    assert response.status_code == 200
+    assert tasks["task-1"].watched is False
+
+
+def test_set_task_watched_returns_404_for_unknown_task(tmp_path, monkeypatch):
+    client, _, _ = _watched_client(tmp_path, monkeypatch, {})
+
+    response = client.put("/tasks/missing/watched", json={"watched": True})
+
+    assert response.status_code == 404
+
+
+def test_set_task_watched_rejects_missing_body_field(tmp_path, monkeypatch):
+    tasks = {"task-1": SimpleNamespace(status="completed", watched=False)}
+    client, _, _ = _watched_client(tmp_path, monkeypatch, tasks)
+
+    response = client.put("/tasks/task-1/watched", json={})
+
+    assert response.status_code == 422
+    assert tasks["task-1"].watched is False

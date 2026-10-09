@@ -19,9 +19,14 @@ logger = logging.getLogger("firered_vad")
 
 _MODEL_DIR_ENV = "FIRERED_VAD_MODEL_DIR"
 _DEFAULT_MODEL_DIR = os.path.join("pretrained_models", "FireRedVAD", "VAD")
+_HF_REPO_ID = "FireRedTeam/FireRedVAD"
 
 _VAD_LOCK = threading.Lock()
 _VAD_INSTANCE = None
+
+_DOWNLOAD_LOCK = threading.Lock()
+_DOWNLOAD_ATTEMPTED = False
+_DOWNLOADED_DIR = None
 
 
 def plan_vad_chunks(segments, max_duration=30.0):
@@ -78,15 +83,50 @@ def plan_vad_chunks(segments, max_duration=30.0):
     return chunks
 
 
+def _download_model_dir():
+    """Fetch the weights into the Hugging Face cache, as the ASR models do.
+
+    Returns the VAD subdirectory, or None when the download is unavailable.
+    """
+    try:
+        from huggingface_hub import snapshot_download
+
+        logger.info("Downloading FireRedVAD weights from %s", _HF_REPO_ID)
+        root = snapshot_download(repo_id=_HF_REPO_ID, allow_patterns=["VAD/*"])
+        candidate = os.path.join(root, "VAD")
+        return candidate if os.path.isdir(candidate) else None
+    except Exception as exc:
+        logger.warning("Could not download FireRedVAD weights: %s", exc)
+        return None
+
+
 def resolve_model_dir():
-    """Return the FireRedVAD model directory (env var overrides the default)."""
-    return os.environ.get(_MODEL_DIR_ENV, _DEFAULT_MODEL_DIR)
+    """Locate the FireRedVAD weights, downloading them once if necessary.
+
+    Order: explicit env override, bundled local directory, then the Hugging
+    Face cache (which is a persistent volume in Docker). Returns None when no
+    weights can be obtained, so callers fall back to fixed-interval splitting.
+    """
+    global _DOWNLOAD_ATTEMPTED, _DOWNLOADED_DIR
+
+    override = os.environ.get(_MODEL_DIR_ENV)
+    if override:
+        return override
+
+    if os.path.isdir(_DEFAULT_MODEL_DIR):
+        return _DEFAULT_MODEL_DIR
+
+    with _DOWNLOAD_LOCK:
+        if not _DOWNLOAD_ATTEMPTED:
+            _DOWNLOAD_ATTEMPTED = True
+            _DOWNLOADED_DIR = _download_model_dir()
+        return _DOWNLOADED_DIR
 
 
 def is_available():
     """True when the fireredasr2s package and model weights are both present."""
     model_dir = resolve_model_dir()
-    if not os.path.isdir(model_dir):
+    if not model_dir or not os.path.isdir(model_dir):
         return False
     try:
         import fireredasr2s.fireredvad  # noqa: F401

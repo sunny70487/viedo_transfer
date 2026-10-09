@@ -1083,6 +1083,45 @@ async def summarize_subtitles_endpoint(
     return notes
 
 
+@router.post("/{task_id}/generate-notes")
+async def generate_notes_endpoint(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    req: SummarizeRequest = ...,
+):
+    """Stream an illustrated Markdown study note (note-crafter style) via SSE."""
+    from starlette.responses import StreamingResponse
+
+    tasks = get_tasks_storage()
+    subtitle_data = SubtitleService.load_subtitle_data(task_id, tasks)
+
+    segments = [
+        {"start": s.start_time, "end": s.end_time, "text": s.text}
+        for s in subtitle_data.subtitles
+    ]
+
+    async def generate():
+        from backend.shared.llm_postprocess import generate_notes as _gen
+        try:
+            for piece in _gen(
+                segments,
+                api_key=req.api_key,
+                base_url=req.base_url,
+                model=req.model,
+                content_hint=req.content_hint,
+            ):
+                yield f"data: {json.dumps({'type': 'delta', 'text': piece})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        except RuntimeError as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        except Exception as e:
+            logger.error(
+                "generate-notes failed for %s: %s", task_id, e, exc_info=True
+            )
+            yield f"data: {json.dumps({'type': 'error', 'message': '筆記生成失敗'})}\n\n"
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
 @router.get("/{task_id}/notes")
 async def get_subtitle_notes(
     task_id: str = FastAPIPath(..., description="任務 ID"),

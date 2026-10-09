@@ -11,6 +11,7 @@ import { SubtitleRow } from '@/components/editor/SubtitleRow'
 import { VideoPlayer, type VideoPlayerHandle } from '@/components/editor/VideoPlayer'
 import { ExportDialog } from '@/components/editor/ExportDialog'
 import { LlmEnhanceDialog } from '@/components/editor/LlmEnhanceDialog'
+import { GenerateNotesDialog } from '@/components/editor/GenerateNotesDialog'
 import { SummaryPanel } from '@/components/editor/SummaryPanel'
 import { useSubtitles, useSaveSubtitles } from '@/hooks/use-subtitles'
 import { useTask } from '@/hooks/use-task'
@@ -48,6 +49,7 @@ export function EditorPage() {
   } = useEditorStore()
   const [exportOpen, setExportOpen] = useState(false)
   const [enhanceOpen, setEnhanceOpen] = useState(false)
+  const [notesOpen, setNotesOpen] = useState(false)
   const [videoTime, setVideoTime] = useState(0)
   const videoRef = useRef<VideoPlayerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -289,6 +291,7 @@ export function EditorPage() {
             onSave={handleSave}
             onExport={() => setExportOpen(true)}
             onEnhance={() => setEnhanceOpen(true)}
+            onGenerateNotes={() => setNotesOpen(true)}
             onImport={replaceSubtitles}
             saving={saveMutation.isPending}
             disabled={isStreaming}
@@ -331,6 +334,12 @@ export function EditorPage() {
         onClose={() => setEnhanceOpen(false)}
         subtitles={subtitles}
         onEnhanced={replaceSubtitles}
+      />
+      <GenerateNotesDialog
+        open={notesOpen}
+        onClose={() => setNotesOpen(false)}
+        taskId={taskId}
+        hasSubtitles={subtitles.length > 0}
       />
       {shortcutsOpen && (
         <div
