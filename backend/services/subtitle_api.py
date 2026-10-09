@@ -354,6 +354,51 @@ def get_tasks_storage():
     return _task_store.get_tasks()
 
 
+def _resolve_task_output_dir(task: Any) -> Optional[str]:
+    """Return the directory holding a task's result files, or None."""
+    result = getattr(task, "result", None)
+    if not result:
+        return None
+    files = result.get("files") or {}
+    first_file = next(iter(files.values()), None)
+    if first_file:
+        return os.path.dirname(first_file)
+    return result.get("output_dir") or None
+
+
+def _require_task(task_id: str) -> Any:
+    tasks = get_tasks_storage()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任務不存在")
+    return tasks[task_id]
+
+
+def _write_task_output(task: Any, filename: str, text: str) -> None:
+    """Best-effort write of a generated artifact next to the task outputs."""
+    output_dir = _resolve_task_output_dir(task)
+    if not output_dir:
+        logger.warning("No output dir; skip saving %s", filename)
+        return
+    try:
+        with open(
+            os.path.join(output_dir, filename), "w", encoding="utf-8"
+        ) as f:
+            f.write(text)
+    except OSError as e:
+        logger.warning("Could not save %s: %s", filename, e, exc_info=True)
+
+
+def _read_task_output(task: Any, filename: str, missing_detail: str) -> str:
+    output_dir = _resolve_task_output_dir(task)
+    if not output_dir:
+        raise HTTPException(status_code=404, detail="找不到輸出目錄")
+    path = os.path.join(output_dir, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=missing_detail)
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
 # API 端點定義
 @router.get("/{task_id}")
 async def get_subtitles(
@@ -1031,7 +1076,7 @@ class SummarizeRequest(BaseModel):
 
 
 @router.post("/{task_id}/summarize")
-async def summarize_subtitles_endpoint(
+def summarize_subtitles_endpoint(
     task_id: str = FastAPIPath(..., description="任務 ID"),
     req: SummarizeRequest = ...,
 ):
@@ -1063,23 +1108,11 @@ async def summarize_subtitles_endpoint(
         )
         raise HTTPException(status_code=500, detail="摘要生成失敗")
 
-    task = tasks[task_id]
-    output_dir = None
-    if task.result and task.result.get("files"):
-        first_file = next(iter(task.result["files"].values()), None)
-        if first_file:
-            output_dir = os.path.dirname(first_file)
-
-    if output_dir:
-        notes_path = os.path.join(
-            output_dir, f"{task_id}_notes.json"
-        )
-        try:
-            with open(notes_path, "w", encoding="utf-8") as f:
-                json.dump(notes, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logger.warning("Could not save notes file: %s", e)
-
+    _write_task_output(
+        tasks[task_id],
+        f"{task_id}_notes.json",
+        json.dumps(notes, ensure_ascii=False, indent=2),
+    )
     return notes
 
 
@@ -1123,27 +1156,10 @@ async def generate_notes_endpoint(
 
 
 @router.get("/{task_id}/notes")
-async def get_subtitle_notes(
+def get_subtitle_notes(
     task_id: str = FastAPIPath(..., description="任務 ID"),
 ):
     """Return previously generated notes, or 404 if not yet generated."""
-    tasks = get_tasks_storage()
-    if task_id not in tasks:
-        raise HTTPException(status_code=404, detail="任務不存在")
-
-    task = tasks[task_id]
-    if not task.result or not task.result.get("files"):
-        raise HTTPException(status_code=404, detail="找不到輸出目錄")
-
-    first_file = next(iter(task.result["files"].values()), None)
-    if not first_file:
-        raise HTTPException(status_code=404, detail="找不到輸出目錄")
-
-    notes_path = os.path.join(
-        os.path.dirname(first_file), f"{task_id}_notes.json"
-    )
-    if not os.path.isfile(notes_path):
-        raise HTTPException(status_code=404, detail="尚未生成摘要")
-
-    with open(notes_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    task = _require_task(task_id)
+    raw = _read_task_output(task, f"{task_id}_notes.json", "尚未生成摘要")
+    return json.loads(raw)
