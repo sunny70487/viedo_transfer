@@ -964,25 +964,75 @@ def generate_mindmap(
     return {"root": _normalize_mindmap(data["root"])}
 
 
-_CONCEPT_SVG_SYSTEM_PROMPT = """\
-你是一位擅長教學動畫的 SVG 設計師。請為指定的概念畫一張「會動的」說明圖。
+_CONCEPT_SVG_RULES = """\
+你是 3Blue1Brown 風格的教學動畫設計師。請為指定的概念畫一張「會動的」SVG 說明圖。
 
 硬性規格：
 - 只輸出一個 <svg> 元素，從 <svg 開始、到 </svg> 結束，前後不要任何文字或 Markdown。
 - 根元素必須是 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">。
-- 第一個子元素是鋪滿畫面的淺色背景 <rect width="800" height="450" fill="#f8fafc"/>。
-- 動畫只能用內嵌 <style> 裡的 CSS @keyframes 與 animation，全部 infinite 循環，\
-整體週期 4~10 秒，用 animation-delay 安排先後順序。
+- 第一個子元素是深色背景 <rect width="800" height="450" fill="#0f172a"/>。
+- 動畫只能用內嵌 <style> 裡的 CSS @keyframes 與 animation，全部 infinite。
 - 文字用繁體中文（台灣用語），font-family 用 sans-serif，每行不超過 14 字，\
 字級至少 18。
 - 禁止：<script>、<foreignObject>、<image>、<iframe>、任何 on* 事件屬性、\
 任何外部網址或 @import。內部引用只能用 #id。
 
-設計原則：
-- 畫面元素少而清楚：3~7 個主要物件，用箭頭、移動、亮起、淡入表達因果或流程。
-- 配色 2~4 色，對比清楚；重點物件用強調色。
-- 讓人看一輪動畫就懂概念在「發生什麼事」。
+視覺風格（必須遵守）：
+- 調色盤：主要物件 #38bdf8（藍）、重點 #fbbf24（黃）、變化或指標 #f472b6（粉）、\
+文字 #e2e8f0、註解 #94a3b8。不要用其他顏色，不要漸層。
+- 形狀只畫外框：fill="none"，stroke-width 2~3，圓角 rx 4~8。
+- 線條要「被畫出來」：設定 stroke-dasharray 與 stroke-dashoffset 等於路徑長度，\
+再用動畫把 stroke-dashoffset 降到 0。
+- 文字以「往上浮 8px＋淡入」出現。
+- 移動、縮放一律用 cubic-bezier(.65,0,.35,1) 或 cubic-bezier(.22,1,.36,1)。
+
+動畫節奏（必須遵守）：
+- 一輪 8~12 秒，所有動畫用同一個週期長度，用 animation-delay 讓元素依序出現。
+- 每輪分三段：依序畫出 → 全部停留讓人看清楚 → 一起淡出後重來。
+- 禁止彈跳、搖晃、閃爍、旋轉、等速 linear 移動、steps()。
+- 一張圖只講一個重點，最多 6 個主要元素，留白要足。
+
+參考範例（概念：函式呼叫時 stack 壓入新的 frame）：
+{example}
+請照這個範例的手法與節奏，為下面的概念設計全新的畫面，不要照抄範例內容。
 """
+
+_CONCEPT_SVG_EXAMPLE = """\
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">
+<style>
+.draw{stroke-dasharray:540;stroke-dashoffset:540;
+animation:draw 10s cubic-bezier(.65,0,.35,1) infinite}
+.fade{opacity:0;animation:fade 10s cubic-bezier(.22,1,.36,1) infinite}
+.d1{animation-delay:.8s}.d2{animation-delay:1.6s}.d3{animation-delay:2.6s}
+.sp{animation:sp 10s cubic-bezier(.65,0,.35,1) infinite}
+@keyframes draw{0%{stroke-dashoffset:540}20%,85%{stroke-dashoffset:0;opacity:1}
+100%{stroke-dashoffset:0;opacity:0}}
+@keyframes fade{0%{opacity:0;transform:translateY(8px)}
+12%,85%{opacity:1;transform:none}100%{opacity:0}}
+@keyframes sp{0%,35%{transform:none}50%,85%{transform:translateY(-80px);opacity:1}
+100%{transform:translateY(-80px);opacity:0}}
+</style>
+<rect width="800" height="450" fill="#0f172a"/>
+<text x="60" y="70" font-family="sans-serif" font-size="26" fill="#e2e8f0"
+ class="fade">呼叫 foo() 時發生什麼事</text>
+<rect x="300" y="300" width="200" height="70" rx="6" fill="none"
+ stroke="#38bdf8" stroke-width="2.5" class="draw"/>
+<text x="400" y="342" text-anchor="middle" font-family="sans-serif"
+ font-size="22" fill="#e2e8f0" class="fade d1">main()</text>
+<rect x="300" y="220" width="200" height="70" rx="6" fill="none"
+ stroke="#fbbf24" stroke-width="2.5" class="draw d1"/>
+<text x="400" y="262" text-anchor="middle" font-family="sans-serif"
+ font-size="22" fill="#fbbf24" class="fade d2">foo() 的 frame</text>
+<g class="sp"><line x1="230" y1="300" x2="290" y2="300" stroke="#f472b6"
+ stroke-width="2.5"/><text x="150" y="307" font-family="sans-serif"
+ font-size="20" fill="#f472b6">SP</text></g>
+<text x="540" y="262" font-family="sans-serif" font-size="18" fill="#94a3b8"
+ class="fade d3">放區域變數、返回位址</text>
+</svg>"""
+
+_CONCEPT_SVG_SYSTEM_PROMPT = _CONCEPT_SVG_RULES.format(
+    example=_CONCEPT_SVG_EXAMPLE
+)
 
 _SVG_BLOCK_RE = re.compile(r"<svg\b[\s\S]*</svg>", re.IGNORECASE)
 

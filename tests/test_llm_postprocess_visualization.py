@@ -139,6 +139,21 @@ def test_notes_prompts_request_concept_anim_blocks():
     assert "Mermaid" in lp._NOTES_REQUIREMENTS
 
 
+def test_concept_svg_prompt_enforces_3b1b_style():
+    prompt = lp._CONCEPT_SVG_SYSTEM_PROMPT
+    for token in ("#0f172a", "#38bdf8", "#fbbf24", "stroke-dashoffset",
+                  "cubic-bezier", "彈跳", "閃爍", "animation-delay"):
+        assert token in prompt
+
+
+def test_concept_svg_prompt_example_passes_sanitizer():
+    from backend.shared.svg_sanitizer import sanitize_svg
+
+    assert lp._CONCEPT_SVG_EXAMPLE in lp._CONCEPT_SVG_SYSTEM_PROMPT
+    assert "{example}" not in lp._CONCEPT_SVG_SYSTEM_PROMPT
+    assert "@keyframes" in sanitize_svg(lp._CONCEPT_SVG_EXAMPLE)
+
+
 GOOD_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">'
     "<style>@keyframes a{to{opacity:0}}</style>"
