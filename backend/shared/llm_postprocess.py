@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -819,6 +820,133 @@ def generate_notes(
     except Exception as exc:
         logger.error("generate_notes failed: %s", exc, exc_info=True)
         raise RuntimeError(_friendly_error(exc)) from exc
+
+
+_MINDMAP_MAX_DEPTH = 4
+_MINDMAP_MAX_NODES = 60
+_MINDMAP_FORMAT_ERROR = "心智圖格式錯誤，請重試"
+
+_MINDMAP_SYSTEM_PROMPT = """\
+你是一位課程內容架構師。請根據字幕逐字稿，整理出一份心智圖。
+
+規則：
+- 根節點是整份內容的主題；第二層是 3~7 個主要概念；往下最多再兩層。
+- 總節點數不超過 50 個。每個節點標題 2~16 字，是名詞片語，不是句子。
+- 每個節點附上該概念「第一次被講到」的時間，直接複製字幕開頭的時間戳\
+（例如 "04:42"），不要換算或猜測。
+- 一律使用台灣繁體中文技術用語。
+- 只輸出合法 JSON，不要 Markdown、不要解釋。格式：
+{"root": {"title": "...", "time": "MM:SS", "children": [\
+{"title": "...", "time": "MM:SS", "children": []}]}}
+"""
+
+
+def _format_transcript(segments: List[Dict[str, Any]]) -> str:
+    lines = []
+    for seg in segments:
+        m, s = divmod(int(seg.get("start", 0.0)), 60)
+        h, m = divmod(m, 60)
+        ts = f"{h:02d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+        text = seg.get("text", "").strip()
+        if text:
+            lines.append(f"[{ts}] {text}")
+    return "\n".join(lines)
+
+
+def _strip_code_fence(raw: str) -> str:
+    raw = raw.strip()
+    if raw.startswith("```"):
+        raw = "\n".join(raw.split("\n")[1:])
+        if raw.rstrip().endswith("```"):
+            raw = raw.rstrip()[:-3]
+    return raw.strip()
+
+
+def _normalize_mindmap(raw_root: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean titles/times and enforce depth and node-count limits (BFS)."""
+    def make(raw: Dict[str, Any]) -> Dict[str, Any]:
+        return {
+            "title": _to_zh_tw_terms(str(raw.get("title", "")).strip()),
+            "time": _parse_chapter_time(raw.get("time", 0)),
+            "children": [],
+        }
+
+    root = make(raw_root)
+    if not root["title"]:
+        raise RuntimeError(_MINDMAP_FORMAT_ERROR)
+
+    count = 1
+    queue = deque([(raw_root, root, 1)])
+    while queue:
+        raw, node, depth = queue.popleft()
+        raw_children = raw.get("children")
+        if depth >= _MINDMAP_MAX_DEPTH or not isinstance(raw_children, list):
+            continue
+        for raw_child in raw_children:
+            if count >= _MINDMAP_MAX_NODES:
+                return root
+            if not isinstance(raw_child, dict):
+                continue
+            child = make(raw_child)
+            if not child["title"]:
+                continue
+            node["children"].append(child)
+            count += 1
+            queue.append((raw_child, child, depth + 1))
+    return root
+
+
+def generate_mindmap(
+    segments: List[Dict[str, Any]],
+    *,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    model: str = "gpt-4o-mini",
+    content_hint: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Build a timestamped mind map from a transcript via LLM.
+
+    Returns {"root": {"title": str, "time": float, "children": [...]}}.
+    Raises RuntimeError on empty input, API error, or malformed output.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError("openai 套件未安裝，無法產生心智圖")
+
+    if not segments:
+        raise RuntimeError("目前沒有字幕資料")
+
+    user_content = _format_transcript(segments)
+    if content_hint:
+        user_content = f"【內容描述】{content_hint}\n\n{user_content}"
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url=_rewrite_localhost_url(base_url.rstrip("/")),
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _MINDMAP_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.3,
+        )
+        raw = response.choices[0].message.content or ""
+    except Exception as exc:
+        logger.error("generate_mindmap failed: %s", exc, exc_info=True)
+        raise RuntimeError(_friendly_error(exc)) from exc
+
+    try:
+        data = json.loads(_strip_code_fence(raw))
+    except json.JSONDecodeError:
+        raise RuntimeError(_MINDMAP_FORMAT_ERROR)
+    if not isinstance(data, dict) or not isinstance(data.get("root"), dict):
+        raise RuntimeError(_MINDMAP_FORMAT_ERROR)
+    return {"root": _normalize_mindmap(data["root"])}
 
 
 def summarize_subtitles(
