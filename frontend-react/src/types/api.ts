@@ -71,11 +71,6 @@ export interface Task {
   source_file_path?: string
 }
 
-export interface SubtitleNotes {
-  summary: string
-  chapters: Array<{ time: number; title: string }>
-}
-
 export interface LlmSummarizeRequest {
   api_key: string
   base_url: string

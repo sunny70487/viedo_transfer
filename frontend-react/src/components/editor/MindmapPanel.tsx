@@ -90,7 +90,12 @@ export function MindmapPanel({ taskId, onSeekTo, disabled }: Readonly<MindmapPan
       )}
 
       {!generating && mindmap && !expanded && (
-        <MindmapView root={mindmap.root} onSeekTo={onSeekTo} className="h-72" />
+        <>
+          <MindmapView root={mindmap.root} onSeekTo={onSeekTo} expandLevel={2} className="h-96" />
+          <p className="text-xs text-muted dark:text-muted-dark">
+            點節點跳至該時間；點圓點展開細節，或按右上角放大檢視全貌
+          </p>
+        </>
       )}
 
       {!generating && !mindmap && (
@@ -101,8 +106,8 @@ export function MindmapPanel({ taskId, onSeekTo, disabled }: Readonly<MindmapPan
       )}
 
       {mindmap && (
-        <Dialog open={expanded} onClose={() => setExpanded(false)} title="心智圖" className="max-w-6xl">
-          {expanded && <MindmapView root={mindmap.root} onSeekTo={seekAndClose} className="h-[75vh]" />}
+        <Dialog open={expanded} onClose={() => setExpanded(false)} title="心智圖" className="max-w-[95vw]">
+          {expanded && <MindmapView root={mindmap.root} onSeekTo={seekAndClose} className="h-[calc(90vh-7rem)]" />}
         </Dialog>
       )}
     </section>

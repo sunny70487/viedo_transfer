@@ -3,7 +3,7 @@ import type {
   SubtitleCollection, TranscriptionRequest,
   RetranscribeRequest, RetranscribeTask,
   BatchResponse, LlmModel, Folder, FolderUploadResponse,
-  SubtitleNotes, LlmSummarizeRequest, Mindmap,
+  LlmSummarizeRequest, Mindmap,
 } from '@/types/api'
 
 const BASE = ''
@@ -317,23 +317,6 @@ export const api = {
         }
       }
     }
-  },
-
-  summarizeSubtitles(taskId: string, data: LlmSummarizeRequest) {
-    return request<SubtitleNotes>(`/api/subtitles/${taskId}/summarize`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    })
-  },
-
-  async getSubtitleNotes(taskId: string): Promise<SubtitleNotes | null> {
-    const res = await fetch(`${BASE}/api/subtitles/${taskId}/notes`)
-    if (res.status === 404) return null
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new Error(body.detail || `Request failed: ${res.status}`)
-    }
-    return res.json()
   },
 
   async getStudyNotes(taskId: string): Promise<string | null> {

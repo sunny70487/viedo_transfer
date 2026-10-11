@@ -12,7 +12,6 @@ import { VideoPlayer, type VideoPlayerHandle } from '@/components/editor/VideoPl
 import { ExportDialog } from '@/components/editor/ExportDialog'
 import { LlmEnhanceDialog } from '@/components/editor/LlmEnhanceDialog'
 import { GenerateNotesDialog } from '@/components/editor/GenerateNotesDialog'
-import { SummaryPanel } from '@/components/editor/SummaryPanel'
 import { MindmapPanel } from '@/components/editor/MindmapPanel'
 import { useSubtitles, useSaveSubtitles } from '@/hooks/use-subtitles'
 import { useTask } from '@/hooks/use-task'
@@ -251,11 +250,6 @@ export function EditorPage() {
             src={videoSrc}
             subtitles={isStreaming ? streamingSubtitles : subtitles}
             onTimeUpdate={setVideoTime}
-          />
-          <SummaryPanel
-            taskId={taskId}
-            onSeekTo={(t) => videoRef.current?.seek(t)}
-            disabled={isStreaming}
           />
           <MindmapPanel
             taskId={taskId}

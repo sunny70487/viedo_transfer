@@ -30,10 +30,11 @@ function toPureNode(node: MindmapNode): IPureNode {
 interface MindmapViewProps {
   root: MindmapNode
   onSeekTo: (time: number) => void
+  expandLevel?: number
   className?: string
 }
 
-export function MindmapView({ root, onSeekTo, className }: Readonly<MindmapViewProps>) {
+export function MindmapView({ root, onSeekTo, expandLevel = -1, className }: Readonly<MindmapViewProps>) {
   const svgRef = useRef<SVGSVGElement>(null)
   const seekRef = useRef(onSeekTo)
   const dark = useThemeStore((s) => s.resolved === 'dark')
@@ -48,13 +49,17 @@ export function MindmapView({ root, onSeekTo, className }: Readonly<MindmapViewP
     import('markmap-view').then(({ Markmap }) => {
       if (cancelled) return
       svg.innerHTML = ''
-      mm = Markmap.create(svg, { initialExpandLevel: 3, duration: 300 }, toPureNode(root))
+      mm = Markmap.create(
+        svg,
+        { initialExpandLevel: expandLevel, duration: 300, maxInitialScale: 1.5 },
+        toPureNode(root),
+      )
     })
     return () => {
       cancelled = true
       mm?.destroy()
     }
-  }, [root])
+  }, [root, expandLevel])
 
   useEffect(() => {
     const svg = svgRef.current
