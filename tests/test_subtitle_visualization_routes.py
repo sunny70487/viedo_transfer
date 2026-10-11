@@ -169,3 +169,61 @@ def test_get_study_notes_404_when_missing(tmp_path):
     client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
     assert client.get("/api/subtitles/task-1/study-notes").status_code == 404
     assert client.get("/api/subtitles/nope/study-notes").status_code == 404
+
+
+def test_mindmap_endpoints_are_sync():
+    subtitle_api = _load_subtitle_api_module()
+    assert not inspect.iscoroutinefunction(subtitle_api.generate_mindmap_endpoint)
+    assert not inspect.iscoroutinefunction(subtitle_api.get_mindmap)
+
+
+def test_post_mindmap_saves_and_returns(tmp_path, monkeypatch):
+    from backend.shared import llm_postprocess as lp
+
+    subtitle_api = _load_subtitle_api_module()
+    mindmap = {"root": {"title": "T", "time": 0.0, "children": []}}
+    seen = {}
+
+    def fake(segments, **kwargs):
+        seen.update(kwargs)
+        seen["segments"] = segments
+        return mindmap
+
+    monkeypatch.setattr(lp, "generate_mindmap", fake)
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+
+    res = client.post(
+        "/api/subtitles/task-1/mindmap", json={"api_key": "k", "model": "m"}
+    )
+
+    assert res.status_code == 200
+    assert res.json() == mindmap
+    assert seen["model"] == "m"
+    assert seen["segments"][0]["text"] == "測試字幕"
+    saved = json.loads(
+        (tmp_path / "task-1_mindmap.json").read_text(encoding="utf-8")
+    )
+    assert saved == mindmap
+    assert client.get("/api/subtitles/task-1/mindmap").json() == mindmap
+
+
+def test_post_mindmap_runtime_error_is_502(tmp_path, monkeypatch):
+    from backend.shared import llm_postprocess as lp
+
+    subtitle_api = _load_subtitle_api_module()
+
+    def boom(segments, **kwargs):
+        raise RuntimeError("心智圖格式錯誤，請重試")
+
+    monkeypatch.setattr(lp, "generate_mindmap", boom)
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+    res = client.post("/api/subtitles/task-1/mindmap", json={"api_key": "k"})
+    assert res.status_code == 502
+    assert res.json()["detail"] == "心智圖格式錯誤，請重試"
+    assert not (tmp_path / "task-1_mindmap.json").exists()
+
+
+def test_get_mindmap_404_when_missing(tmp_path):
+    subtitle_api = _load_subtitle_api_module()
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+    assert client.get("/api/subtitles/task-1/mindmap").status_code == 404

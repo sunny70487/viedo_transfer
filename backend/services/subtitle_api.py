@@ -1199,6 +1199,49 @@ def get_study_notes(
     return {"markdown": markdown}
 
 
+@router.post("/{task_id}/mindmap")
+def generate_mindmap_endpoint(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    req: SummarizeRequest = ...,
+):
+    """Generate a timestamped mind map from the transcript and save it."""
+    tasks = get_tasks_storage()
+    subtitle_data = SubtitleService.load_subtitle_data(task_id, tasks)
+    segments = [
+        {"start": s.start_time, "end": s.end_time, "text": s.text}
+        for s in subtitle_data.subtitles
+    ]
+
+    from backend.shared.llm_postprocess import generate_mindmap as _gen
+    try:
+        mindmap = _gen(
+            segments,
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+            content_hint=req.content_hint,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    _write_task_output(
+        tasks[task_id],
+        f"{task_id}_mindmap.json",
+        json.dumps(mindmap, ensure_ascii=False, indent=2),
+    )
+    return mindmap
+
+
+@router.get("/{task_id}/mindmap")
+def get_mindmap(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+):
+    """Return the saved mind map, or 404 if not yet generated."""
+    task = _require_task(task_id)
+    raw = _read_task_output(task, f"{task_id}_mindmap.json", "尚未產生心智圖")
+    return json.loads(raw)
+
+
 @router.get("/{task_id}/notes")
 def get_subtitle_notes(
     task_id: str = FastAPIPath(..., description="任務 ID"),
