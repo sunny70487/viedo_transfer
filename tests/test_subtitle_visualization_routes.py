@@ -227,3 +227,94 @@ def test_get_mindmap_404_when_missing(tmp_path):
     subtitle_api = _load_subtitle_api_module()
     client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
     assert client.get("/api/subtitles/task-1/mindmap").status_code == 404
+
+
+ANIM_URL = "/api/subtitles/task-1/concept-animations"
+
+
+def test_concept_animation_endpoints_are_sync():
+    subtitle_api = _load_subtitle_api_module()
+    assert not inspect.iscoroutinefunction(
+        subtitle_api.generate_concept_animation_endpoint
+    )
+    assert not inspect.iscoroutinefunction(subtitle_api.get_concept_animation)
+
+
+def test_concept_animation_rejects_invalid_id(tmp_path):
+    subtitle_api = _load_subtitle_api_module()
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+    for bad in ["UPPER", "has_underscore", "a" * 33, "dot.dot"]:
+        assert client.get(f"{ANIM_URL}/{bad}").status_code == 400
+        res = client.post(
+            f"{ANIM_URL}/{bad}", json={"title": "T", "brief": "B", "api_key": "k"}
+        )
+        assert res.status_code == 400
+
+
+def test_get_concept_animation_404_when_missing(tmp_path):
+    subtitle_api = _load_subtitle_api_module()
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+    assert client.get(f"{ANIM_URL}/tcp").status_code == 404
+
+
+def test_post_concept_animation_saves_and_returns(tmp_path, monkeypatch):
+    from backend.shared import llm_postprocess as lp
+
+    subtitle_api = _load_subtitle_api_module()
+    seen = {}
+
+    def fake(**kwargs):
+        seen.update(kwargs)
+        return "<svg/>"
+
+    monkeypatch.setattr(lp, "generate_concept_svg", fake)
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+
+    res = client.post(
+        f"{ANIM_URL}/tcp-1",
+        json={"title": "TCP", "brief": "B", "api_key": "k", "model": "draw"},
+    )
+
+    assert res.status_code == 200
+    assert res.json() == {"svg": "<svg/>"}
+    assert seen["model"] == "draw"
+    assert seen["title"] == "TCP"
+    saved = tmp_path / "task-1_anim_tcp-1.svg"
+    assert saved.read_text(encoding="utf-8") == "<svg/>"
+    assert client.get(f"{ANIM_URL}/tcp-1").json() == {"svg": "<svg/>"}
+
+
+def test_post_concept_animation_runtime_error_is_502(tmp_path, monkeypatch):
+    from backend.shared import llm_postprocess as lp
+
+    subtitle_api = _load_subtitle_api_module()
+
+    def boom(**kwargs):
+        raise RuntimeError("SVG 生成失敗，請重試")
+
+    monkeypatch.setattr(lp, "generate_concept_svg", boom)
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+    res = client.post(
+        f"{ANIM_URL}/tcp", json={"title": "T", "brief": "B", "api_key": "k"}
+    )
+    assert res.status_code == 502
+    assert not (tmp_path / "task-1_anim_tcp.svg").exists()
+
+
+def test_post_concept_animation_validates_lengths(tmp_path):
+    subtitle_api = _load_subtitle_api_module()
+    client = _client(subtitle_api, {"task-1": _make_task(tmp_path)})
+    res = client.post(
+        f"{ANIM_URL}/tcp",
+        json={"title": "T" * 101, "brief": "B", "api_key": "k"},
+    )
+    assert res.status_code == 422
+
+
+def test_post_concept_animation_unknown_task_404(tmp_path):
+    subtitle_api = _load_subtitle_api_module()
+    client = _client(subtitle_api, {})
+    res = client.post(
+        f"{ANIM_URL}/tcp", json={"title": "T", "brief": "B", "api_key": "k"}
+    )
+    assert res.status_code == 404

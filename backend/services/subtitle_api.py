@@ -11,10 +11,11 @@ import os
 import json
 import time
 import logging
+import re
 from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Path as FastAPIPath
 from fastapi.responses import FileResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.models import (
     SubtitleCollection,
@@ -1250,3 +1251,59 @@ def get_subtitle_notes(
     task = _require_task(task_id)
     raw = _read_task_output(task, f"{task_id}_notes.json", "尚未生成摘要")
     return json.loads(raw)
+
+
+_ANIM_ID_RE = re.compile(r"^[a-z0-9-]{1,32}$")
+
+
+def _validate_anim_id(anim_id: str) -> None:
+    if not _ANIM_ID_RE.match(anim_id):
+        raise HTTPException(status_code=400, detail="動畫 ID 格式不正確")
+
+
+class ConceptAnimationRequest(BaseModel):
+    title: str = Field(..., max_length=100)
+    brief: str = Field(..., max_length=1000)
+    api_key: str
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4o-mini"
+    content_hint: Optional[str] = None
+
+
+@router.post("/{task_id}/concept-animations/{anim_id}")
+def generate_concept_animation_endpoint(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    anim_id: str = FastAPIPath(..., description="動畫 ID"),
+    req: ConceptAnimationRequest = ...,
+):
+    """Draw (or redraw) one CSS-animated concept SVG and save it."""
+    _validate_anim_id(anim_id)
+    task = _require_task(task_id)
+
+    from backend.shared import llm_postprocess
+    try:
+        svg = llm_postprocess.generate_concept_svg(
+            title=req.title,
+            brief=req.brief,
+            content_hint=req.content_hint,
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    _write_task_output(task, f"{task_id}_anim_{anim_id}.svg", svg)
+    return {"svg": svg}
+
+
+@router.get("/{task_id}/concept-animations/{anim_id}")
+def get_concept_animation(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    anim_id: str = FastAPIPath(..., description="動畫 ID"),
+):
+    """Return a previously generated concept SVG, or 404."""
+    _validate_anim_id(anim_id)
+    task = _require_task(task_id)
+    svg = _read_task_output(task, f"{task_id}_anim_{anim_id}.svg", "尚未產生動畫")
+    return {"svg": svg}
