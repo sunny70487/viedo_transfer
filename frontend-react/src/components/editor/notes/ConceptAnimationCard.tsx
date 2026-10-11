@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { RefreshCw, Sparkles } from 'lucide-react'
+import { Download, RefreshCw, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { api } from '@/api/client'
 import { loadLlmSettings } from '@/hooks/use-llm-settings'
@@ -7,6 +7,11 @@ import type { ConceptAnimSpec } from '@/types/api'
 import { runInAnimQueue } from './concept-anim-queue'
 
 type Status = 'loading' | 'empty' | 'generating' | 'ready' | 'error'
+
+function svgFileName(title: string): string {
+  const safe = title.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim()
+  return `${safe || 'concept-animation'}.svg`
+}
 
 interface ConceptAnimationCardProps {
   taskId: string
@@ -78,11 +83,22 @@ export function ConceptAnimationCard({ taskId, spec, autoGenerate }: Readonly<Co
           <Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />
           {spec.title}
         </figcaption>
-        {status === 'ready' && (
-          <Button variant="ghost" size="sm" onClick={() => void generate()} aria-label={`重畫 ${spec.title} 動畫`}>
-            <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-            重畫
-          </Button>
+        {status === 'ready' && src && (
+          <div className="flex items-center gap-1">
+            <a
+              href={src}
+              download={svgFileName(spec.title)}
+              aria-label={`下載 ${spec.title} 動畫 SVG`}
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-medium text-text dark:text-text-dark transition-colors duration-200 hover:bg-gray-100 dark:hover:bg-gray-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              下載 SVG
+            </a>
+            <Button variant="ghost" size="sm" onClick={() => void generate()} aria-label={`重畫 ${spec.title} 動畫`}>
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+              重畫
+            </Button>
+          </div>
         )}
       </div>
 

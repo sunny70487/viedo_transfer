@@ -61,3 +61,4 @@ Thumbs.db
 .cursor/
 docs/
 .pytest_cache/
+.superpowers/
