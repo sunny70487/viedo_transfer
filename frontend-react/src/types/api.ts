@@ -83,6 +83,16 @@ export interface LlmSummarizeRequest {
   content_hint?: string
 }
 
+export interface MindmapNode {
+  title: string
+  time: number
+  children: MindmapNode[]
+}
+
+export interface Mindmap {
+  root: MindmapNode
+}
+
 export interface Folder {
   id: string
   name: string
