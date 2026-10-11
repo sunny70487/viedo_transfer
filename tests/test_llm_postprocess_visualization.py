@@ -131,3 +131,56 @@ def test_generate_mindmap_wraps_api_errors(monkeypatch):
     _fake_openai(monkeypatch, error=Exception("rate limited"))
     with pytest.raises(RuntimeError, match="rate limited"):
         lp.generate_mindmap(SEGMENTS, api_key="k")
+
+
+def test_notes_prompts_request_concept_anim_blocks():
+    assert "```concept-anim" in lp._NOTES_SYSTEM_PROMPT
+    assert "concept-anim" in lp._NOTES_REQUIREMENTS
+    assert "Mermaid" in lp._NOTES_REQUIREMENTS
+
+
+GOOD_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">'
+    "<style>@keyframes a{to{opacity:0}}</style>"
+    '<rect width="800" height="450" fill="#f8fafc"/></svg>'
+)
+
+
+def test_generate_concept_svg_extracts_svg_from_noisy_reply(monkeypatch):
+    calls = _fake_openai(
+        monkeypatch, f"這是動畫：\n```svg\n{GOOD_SVG}\n```\n希望你喜歡"
+    )
+    out = lp.generate_concept_svg(
+        title="TCP", brief="封包飛行", api_key="k", model="draw"
+    )
+    assert out.startswith("<svg")
+    assert out.rstrip().endswith("</svg>")
+    assert "@keyframes a" in out
+    assert calls[0]["model"] == "draw"
+    user = calls[0]["messages"][1]["content"]
+    assert "TCP" in user and "封包飛行" in user
+
+
+def test_generate_concept_svg_sanitizes_output(monkeypatch):
+    dirty = GOOD_SVG.replace("</svg>", "<script>alert(1)</script></svg>")
+    _fake_openai(monkeypatch, dirty)
+    out = lp.generate_concept_svg(title="T", brief="B", api_key="k")
+    assert "<script" not in out
+
+
+def test_generate_concept_svg_without_svg_raises(monkeypatch):
+    _fake_openai(monkeypatch, "抱歉我不會畫")
+    with pytest.raises(RuntimeError, match="SVG 生成失敗"):
+        lp.generate_concept_svg(title="T", brief="B", api_key="k")
+
+
+def test_generate_concept_svg_unsafe_document_raises(monkeypatch):
+    _fake_openai(monkeypatch, "<svg><rect></svg>")
+    with pytest.raises(RuntimeError, match="SVG 內容不安全或格式錯誤"):
+        lp.generate_concept_svg(title="T", brief="B", api_key="k")
+
+
+def test_generate_concept_svg_wraps_api_errors(monkeypatch):
+    _fake_openai(monkeypatch, error=Exception("quota"))
+    with pytest.raises(RuntimeError, match="quota"):
+        lp.generate_concept_svg(title="T", brief="B", api_key="k")

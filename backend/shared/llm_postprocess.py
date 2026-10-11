@@ -652,6 +652,18 @@ _NOTES_SYSTEM_PROMPT = """\
 - 程式碼/組語/結構體用 fenced code block，並加行內註解說明「為什麼」。
 - 技術名詞首次出現給中英對照，例如「記憶體對齊 (Memory Alignment)」。
 
+## 重點概念動畫標記
+挑 2~4 個最抽象、最需要「看它動起來」才好懂的概念（例如流程、狀態變化、\
+資料流動），在該概念解說段落的最後插入一個標記區塊，系統會據此另外繪製動畫：
+
+```concept-anim
+{"id": "tcp-handshake", "title": "TCP 三向交握", "brief": "三個封包依序來回飛行"}
+```
+
+- `id` 只能用小寫英文、數字、連字號，最多 32 字，全篇不可重複。
+- `title` 是概念名稱；`brief` 用 1~3 句描述畫面裡有哪些元素、怎麼動。
+- 標記區塊只放這一行 JSON。它**不取代** Mermaid / ASCII 圖的配額。
+
 ## 用語：一律台灣繁體中文技術用語（不得使用大陸用語）
 即使逐字稿講的是大陸用語，輸出也必須換成下表左欄：
 
@@ -736,6 +748,9 @@ _NOTES_REQUIREMENTS = """
    收攏重點。條列只放結論，不要拿條列當解釋。
 
 6. 【標題】用「概念名：副標」的描述式命名，不要用「一、二、三」數字編號。
+
+7. 【概念動畫】挑 2~4 個最抽象的概念，在解說段落後各插入一個
+   ```concept-anim 區塊（單行 JSON，含 id / title / brief）。id 用小寫英文與連字號。
 
 現在直接輸出 Markdown 筆記本身，從 `# ` 標題開始。
 不要回問我問題、不要說明你要做什麼、不要有任何開場白或結語、不要輸出這份清單。
@@ -947,6 +962,82 @@ def generate_mindmap(
     if not isinstance(data, dict) or not isinstance(data.get("root"), dict):
         raise RuntimeError(_MINDMAP_FORMAT_ERROR)
     return {"root": _normalize_mindmap(data["root"])}
+
+
+_CONCEPT_SVG_SYSTEM_PROMPT = """\
+你是一位擅長教學動畫的 SVG 設計師。請為指定的概念畫一張「會動的」說明圖。
+
+硬性規格：
+- 只輸出一個 <svg> 元素，從 <svg 開始、到 </svg> 結束，前後不要任何文字或 Markdown。
+- 根元素必須是 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">。
+- 第一個子元素是鋪滿畫面的淺色背景 <rect width="800" height="450" fill="#f8fafc"/>。
+- 動畫只能用內嵌 <style> 裡的 CSS @keyframes 與 animation，全部 infinite 循環，\
+整體週期 4~10 秒，用 animation-delay 安排先後順序。
+- 文字用繁體中文（台灣用語），font-family 用 sans-serif，每行不超過 14 字，\
+字級至少 18。
+- 禁止：<script>、<foreignObject>、<image>、<iframe>、任何 on* 事件屬性、\
+任何外部網址或 @import。內部引用只能用 #id。
+
+設計原則：
+- 畫面元素少而清楚：3~7 個主要物件，用箭頭、移動、亮起、淡入表達因果或流程。
+- 配色 2~4 色，對比清楚；重點物件用強調色。
+- 讓人看一輪動畫就懂概念在「發生什麼事」。
+"""
+
+_SVG_BLOCK_RE = re.compile(r"<svg\b[\s\S]*</svg>", re.IGNORECASE)
+
+
+def generate_concept_svg(
+    *,
+    title: str,
+    brief: str,
+    content_hint: Optional[str] = None,
+    api_key: str,
+    base_url: str = "https://api.openai.com/v1",
+    model: str = "gpt-4o-mini",
+) -> str:
+    """
+    Ask the LLM for a CSS-animated SVG explaining one concept.
+
+    Returns a sanitized SVG string. Raises RuntimeError on API error,
+    missing SVG, or unsafe/malformed SVG.
+    """
+    from backend.shared.svg_sanitizer import sanitize_svg
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        raise RuntimeError("openai 套件未安裝，無法產生動畫")
+
+    hint = f"\n課程背景：{content_hint}" if content_hint else ""
+    user_content = f"概念：{title}\n畫面描述：{brief}{hint}"
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url=_rewrite_localhost_url(base_url.rstrip("/")),
+    )
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _CONCEPT_SVG_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=0.7,
+        )
+        raw = response.choices[0].message.content or ""
+    except Exception as exc:
+        logger.error("generate_concept_svg failed: %s", exc, exc_info=True)
+        raise RuntimeError(_friendly_error(exc)) from exc
+
+    match = _SVG_BLOCK_RE.search(raw)
+    if not match:
+        raise RuntimeError("SVG 生成失敗，請重試")
+    try:
+        return sanitize_svg(match.group(0))
+    except ValueError as exc:
+        logger.warning("Rejected generated SVG: %s", exc)
+        raise RuntimeError("SVG 內容不安全或格式錯誤，請重畫") from exc
 
 
 def summarize_subtitles(
