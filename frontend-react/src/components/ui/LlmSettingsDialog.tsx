@@ -19,6 +19,7 @@ export function LlmSettingsDialog({ open, onClose }: Readonly<Props>) {
   const [apiKey, setApiKey] = useState('')
   const [baseUrl, setBaseUrl] = useState('https://api.openai.com/v1')
   const [model, setModel] = useState('gpt-4o-mini')
+  const [svgModel, setSvgModel] = useState('')
   const [models, setModels] = useState<LlmModel[]>([])
   const [modelStatus, setModelStatus] = useState<ModelStatus>('idle')
   const [modelError, setModelError] = useState('')
@@ -30,6 +31,7 @@ export function LlmSettingsDialog({ open, onClose }: Readonly<Props>) {
     setApiKey(s.api_key)
     setBaseUrl(s.base_url)
     setModel(s.model)
+    setSvgModel(s.svg_model)
   }, [open])
 
   const fetchModels = useCallback(async (key: string, url: string) => {
@@ -55,7 +57,7 @@ export function LlmSettingsDialog({ open, onClose }: Readonly<Props>) {
   }, [open, apiKey, baseUrl, fetchModels])
 
   const handleSave = () => {
-    saveLlmSettings({ api_key: apiKey, base_url: baseUrl, model })
+    saveLlmSettings({ api_key: apiKey, base_url: baseUrl, model, svg_model: svgModel.trim() })
     toast('success', 'LLM 設定已儲存')
     onClose()
   }
@@ -64,7 +66,7 @@ export function LlmSettingsDialog({ open, onClose }: Readonly<Props>) {
     <Dialog open={open} onClose={onClose} title="LLM API 設定">
       <div className="space-y-4">
         <p className="text-sm text-muted dark:text-muted-dark">
-          設定後，AI 校對增強、翻譯字幕、摘要生成都會使用這組 API 設定。
+          設定後，AI 校對增強、翻譯字幕、筆記、心智圖與概念動畫都會使用這組 API 設定。
         </p>
 
         <div>
@@ -131,6 +133,25 @@ export function LlmSettingsDialog({ open, onClose }: Readonly<Props>) {
               value={model}
               onChange={(e) => setModel(e.target.value)}
             />
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="llm-svg-model" className="block text-sm font-medium text-text dark:text-text-dark mb-1">
+            SVG 繪圖模型 <span className="text-muted dark:text-muted-dark font-normal">（選填，留空沿用主模型）</span>
+          </label>
+          <Input
+            id="llm-svg-model"
+            type="text"
+            list="llm-svg-model-options"
+            placeholder={model || 'gpt-4o'}
+            value={svgModel}
+            onChange={(e) => setSvgModel(e.target.value)}
+          />
+          {models.length > 0 && (
+            <datalist id="llm-svg-model-options">
+              {models.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </datalist>
           )}
         </div>
 

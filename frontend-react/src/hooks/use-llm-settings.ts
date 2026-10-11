@@ -4,6 +4,7 @@ export interface LlmSettings {
   api_key: string
   base_url: string
   model: string
+  svg_model: string
   content_hint: string
 }
 
@@ -11,6 +12,7 @@ const DEFAULTS: LlmSettings = {
   api_key: '',
   base_url: 'https://api.openai.com/v1',
   model: 'gpt-4o-mini',
+  svg_model: '',
   content_hint: '',
 }
 
@@ -23,6 +25,7 @@ export function loadLlmSettings(): LlmSettings {
         api_key: parsed.llm_api_key || '',
         base_url: parsed.llm_base_url || DEFAULTS.base_url,
         model: parsed.llm_model || DEFAULTS.model,
+        svg_model: parsed.llm_svg_model || '',
         content_hint: parsed.llm_content_hint || '',
       }
     }
@@ -38,6 +41,7 @@ export function saveLlmSettings(s: Partial<LlmSettings>) {
       llm_api_key: merged.api_key,
       llm_base_url: merged.base_url,
       llm_model: merged.model,
+      llm_svg_model: merged.svg_model,
       llm_content_hint: merged.content_hint,
     }))
   } catch { /* ignore */ }
