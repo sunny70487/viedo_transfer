@@ -3,7 +3,7 @@ import type {
   SubtitleCollection, TranscriptionRequest,
   RetranscribeRequest, RetranscribeTask,
   BatchResponse, LlmModel, Folder, FolderUploadResponse,
-  LlmSummarizeRequest, Mindmap,
+  LlmSummarizeRequest, Mindmap, ConceptAnimationRequest,
 } from '@/types/api'
 
 const BASE = ''
@@ -345,5 +345,28 @@ export const api = {
       throw new Error(body.detail || `Request failed: ${res.status}`)
     }
     return res.json()
+  },
+
+  async getConceptAnimation(taskId: string, animId: string): Promise<string | null> {
+    const res = await fetch(`${BASE}/api/subtitles/${taskId}/concept-animations/${animId}`)
+    if (res.status === 404) return null
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body.detail || `Request failed: ${res.status}`)
+    }
+    const body = (await res.json()) as { svg: string }
+    return body.svg
+  },
+
+  async generateConceptAnimation(
+    taskId: string,
+    animId: string,
+    data: ConceptAnimationRequest,
+  ): Promise<string> {
+    const body = await request<{ svg: string }>(
+      `/api/subtitles/${taskId}/concept-animations/${animId}`,
+      { method: 'POST', body: JSON.stringify(data) },
+    )
+    return body.svg
   },
 }

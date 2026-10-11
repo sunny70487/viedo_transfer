@@ -2,10 +2,14 @@ import { isValidElement, useMemo, type ReactNode } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { MermaidBlock } from './MermaidBlock'
+import { ConceptAnimationCard } from './ConceptAnimationCard'
+import { dedupeConceptAnimIds, parseConceptAnimSpec } from './concept-anim-spec'
 
 interface NoteRendererProps {
   markdown: string
   streaming: boolean
+  taskId: string
+  autoGenerateAnims: boolean
 }
 
 function DiagramPlaceholder({ label }: Readonly<{ label: string }>) {
@@ -25,7 +29,7 @@ function readCodeChild(children: ReactNode): { lang: string; text: string } {
   return { lang, text }
 }
 
-function buildComponents(streaming: boolean): Components {
+function buildComponents(streaming: boolean, taskId: string, autoGenerateAnims: boolean): Components {
   return {
     h1: ({ children }) => <h1 className="mt-2 mb-4 text-2xl font-bold">{children}</h1>,
     h2: ({ children }) => <h2 className="mt-6 mb-3 text-xl font-semibold border-b border-border dark:border-border-dark pb-1">{children}</h2>,
@@ -56,6 +60,13 @@ function buildComponents(streaming: boolean): Components {
       if (lang === 'mermaid') {
         return streaming ? <DiagramPlaceholder label="圖表產生中…" /> : <MermaidBlock code={text} />
       }
+      if (lang === 'concept-anim') {
+        if (streaming) return <DiagramPlaceholder label="概念動畫（筆記完成後繪製）" />
+        const spec = parseConceptAnimSpec(text)
+        if (spec) {
+          return <ConceptAnimationCard key={spec.id} taskId={taskId} spec={spec} autoGenerate={autoGenerateAnims} />
+        }
+      }
       return (
         <pre className="my-3 overflow-auto rounded-lg border border-border dark:border-border-dark bg-bg dark:bg-bg-dark p-3 text-xs leading-relaxed font-mono">
           <code>{text}</code>
@@ -65,12 +76,19 @@ function buildComponents(streaming: boolean): Components {
   }
 }
 
-export function NoteRenderer({ markdown, streaming }: Readonly<NoteRendererProps>) {
-  const components = useMemo(() => buildComponents(streaming), [streaming])
+export function NoteRenderer({ markdown, streaming, taskId, autoGenerateAnims }: Readonly<NoteRendererProps>) {
+  const source = useMemo(
+    () => (streaming ? markdown : dedupeConceptAnimIds(markdown)),
+    [markdown, streaming],
+  )
+  const components = useMemo(
+    () => buildComponents(streaming, taskId, autoGenerateAnims),
+    [streaming, taskId, autoGenerateAnims],
+  )
   return (
     <article className="text-sm text-text dark:text-text-dark break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {markdown}
+        {source}
       </ReactMarkdown>
     </article>
   )

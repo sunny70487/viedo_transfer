@@ -187,3 +187,18 @@ export interface RetranscribeTask {
   }
   error?: string
 }
+
+export interface ConceptAnimSpec {
+  id: string
+  title: string
+  brief: string
+}
+
+export interface ConceptAnimationRequest {
+  title: string
+  brief: string
+  api_key: string
+  base_url: string
+  model: string
+  content_hint?: string
+}

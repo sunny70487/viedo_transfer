@@ -21,6 +21,7 @@ export function GenerateNotesDialog({
   const [apiKeySet, setApiKeySet] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [markdown, setMarkdown] = useState('')
+  const [justGenerated, setJustGenerated] = useState(false)
   const [copied, setCopied] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -30,6 +31,7 @@ export function GenerateNotesDialog({
     setContentHint(s.content_hint)
     setApiKeySet(Boolean(s.api_key))
     setMarkdown('')
+    setJustGenerated(false)
     let cancelled = false
     api.getStudyNotes(taskId)
       .then((md) => { if (!cancelled && md) setMarkdown(md) })
@@ -48,6 +50,7 @@ export function GenerateNotesDialog({
     saveLlmSettings({ content_hint: contentHint })
     setGenerating(true)
     setMarkdown('')
+    setJustGenerated(false)
     const controller = new AbortController()
     abortRef.current = controller
 
@@ -61,6 +64,8 @@ export function GenerateNotesDialog({
       for await (const event of stream) {
         if (event.type === 'delta' && event.text) {
           setMarkdown((prev) => prev + event.text)
+        } else if (event.type === 'done') {
+          setJustGenerated(true)
         } else if (event.type === 'error') {
           toast('error', `筆記生成失敗: ${event.message}`)
         }
@@ -111,7 +116,7 @@ export function GenerateNotesDialog({
         {!markdown && !generating && (
           <>
             <p className="text-sm text-muted dark:text-muted-dark">
-              依字幕逐字稿整理成一份圖文並茂的繁體中文教學筆記（比喻、表格、Mermaid/ASCII 圖、應用場景與小結）。
+              依字幕逐字稿整理成一份圖文並茂的繁體中文教學筆記（比喻、表格、Mermaid/ASCII 圖、應用場景與小結），並為重點概念繪製 SVG 動畫。
             </p>
             <div>
               <label htmlFor="notes-hint" className="block text-sm font-medium text-text dark:text-text-dark mb-1">
@@ -131,7 +136,12 @@ export function GenerateNotesDialog({
 
         {(markdown || generating) && (
           <div className="max-h-[60vh] overflow-auto rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark p-4">
-            <NoteRenderer markdown={markdown} streaming={generating} />
+            <NoteRenderer
+              markdown={markdown}
+              streaming={generating}
+              taskId={taskId}
+              autoGenerateAnims={justGenerated}
+            />
             {generating && <span className="inline-block w-2 h-4 bg-primary/70 animate-pulse align-middle ml-0.5" />}
           </div>
         )}
