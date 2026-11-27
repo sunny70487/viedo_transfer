@@ -82,6 +82,13 @@ export const api = {
     })
   },
 
+  renameTask(taskId: string, name: string) {
+    return request<{ id: string; source_name: string }>(`/tasks/${taskId}/name`, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    })
+  },
+
   deleteAllFailedTasks() {
     return request<{ message: string; deleted_count: number }>('/tasks/failed', { method: 'DELETE' })
   },

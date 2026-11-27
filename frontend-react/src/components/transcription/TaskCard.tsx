@@ -1,10 +1,10 @@
-import { useState, useMemo } from 'react'
-import { ChevronDown, Trash2, FileText, Download, FolderInput, Eye, CircleCheck, Circle } from 'lucide-react'
+import { useState, useMemo, useRef } from 'react'
+import { ChevronDown, Trash2, FileText, Download, FolderInput, Eye, CircleCheck, Circle, Pencil } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Progress } from '@/components/ui/Progress'
-import { useDeleteTask, useSetTaskWatched } from '@/hooks/use-tasks'
+import { useDeleteTask, useRenameTask, useSetTaskWatched } from '@/hooks/use-tasks'
 import { useFolders, useMoveTasksToFolder, useRemoveTasksFromFolder } from '@/hooks/use-folders'
 import { useTaskStream } from '@/hooks/use-task-stream'
 import { api } from '@/api/client'
@@ -29,6 +29,77 @@ function buildFlatTree(folders: Folder[]): { folder: Folder; depth: number }[] {
   }
   walk(null, 0)
   return result
+}
+
+const MAX_TASK_NAME_LENGTH = 200
+
+function TaskName({ task }: Readonly<{ task: Task }>) {
+  const renameMutation = useRenameTask()
+  const [draft, setDraft] = useState<string | null>(null)
+  const editingRef = useRef(false)
+  const savedName = task.source_name ?? ''
+  const name = renameMutation.isPending ? renameMutation.variables.name : savedName
+
+  const startEditing = () => {
+    editingRef.current = true
+    setDraft(savedName)
+  }
+
+  const stopEditing = (save: boolean) => {
+    if (!editingRef.current) return
+    editingRef.current = false
+    const next = (draft ?? '').trim()
+    setDraft(null)
+    if (save && next && next !== savedName) {
+      renameMutation.mutate({ taskId: task.id, name: next })
+    }
+  }
+
+  if (draft !== null) {
+    return (
+      <input
+        autoFocus
+        aria-label="任務名稱"
+        className="h-7 min-w-0 flex-1 rounded-md border border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-2 text-sm font-medium text-text dark:text-text-dark focus:outline-none focus:ring-2 focus:ring-primary/50"
+        value={draft}
+        maxLength={MAX_TASK_NAME_LENGTH}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={() => stopEditing(true)}
+        onPointerDown={(e) => e.stopPropagation()}
+        onKeyDown={(e) => {
+          e.stopPropagation()
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'Enter') stopEditing(true)
+          if (e.key === 'Escape') stopEditing(false)
+        }}
+      />
+    )
+  }
+
+  return (
+    <>
+      <span
+        className={cn(
+          'text-sm font-medium truncate',
+          name ? 'text-text dark:text-text-dark' : 'text-muted dark:text-muted-dark',
+        )}
+        title={name || undefined}
+      >
+        {name || '未命名'}
+      </span>
+      <button
+        type="button"
+        onClick={startEditing}
+        disabled={renameMutation.isPending}
+        title="重新命名"
+        aria-label="重新命名"
+        className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted dark:text-muted-dark transition-colors duration-200 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-text dark:hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+      >
+        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    </>
+  )
 }
 
 interface TaskCardProps {
@@ -92,9 +163,7 @@ export function TaskCard({ task }: Readonly<TaskCardProps>) {
                 {statusInfo?.label ?? task.status}
               </Badge>
               {isWatched && <Badge variant="info">已看過</Badge>}
-              {task.source_name && (
-                <span className="text-sm font-medium text-text dark:text-text-dark truncate">{task.source_name}</span>
-              )}
+              <TaskName task={task} />
             </div>
             {task.message && (
               <p className="text-sm text-muted dark:text-muted-dark truncate">{task.message}</p>

@@ -19,6 +19,13 @@ class SetWatchedRequest(BaseModel):
     watched: bool
 
 
+class RenameTaskRequest(BaseModel):
+    name: str
+
+
+_MAX_TASK_NAME_LENGTH = 200
+
+
 _task_registry: Optional[Dict[str, Any]] = None
 
 
@@ -128,6 +135,35 @@ async def set_task_watched(task_id: str, req: SetWatchedRequest):
 
     tasks[task_id].watched = req.watched
     return {"id": task_id, "watched": req.watched}
+
+
+@router.put("/tasks/{task_id}/name")
+async def rename_task(task_id: str, req: RenameTaskRequest):
+    """Rename a task (overwrites the display name shown in the task list)."""
+    tasks = get_task_registry()
+    if task_id not in tasks:
+        raise HTTPException(status_code=404, detail="任務不存在")
+
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="任務名稱不可為空")
+    if len(name) > _MAX_TASK_NAME_LENGTH:
+        raise HTTPException(status_code=400, detail="任務名稱過長")
+
+    try:
+        with SessionLocal() as session:
+            record = session.get(TaskRecord, task_id)
+            if record is not None:
+                record.source_name = name
+                session.commit()
+    except Exception as e:
+        logger.error(
+            "Failed to rename task %s: %s", task_id, e, exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="無法更新任務名稱")
+
+    tasks[task_id].source_name = name
+    return {"id": task_id, "source_name": name}
 
 
 @router.get("/tasks/batch/{batch_id}")

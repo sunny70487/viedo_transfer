@@ -138,3 +138,73 @@ def test_set_task_watched_rejects_missing_body_field(tmp_path, monkeypatch):
 
     assert response.status_code == 422
     assert tasks["task-1"].watched is False
+
+
+def test_rename_task_updates_registry_and_database(tmp_path, monkeypatch):
+    tasks = {"task-1": SimpleNamespace(status="completed", source_name="old.mp4")}
+    client, session_factory, task_record = _watched_client(
+        tmp_path, monkeypatch, tasks
+    )
+
+    response = client.put("/tasks/task-1/name", json={"name": "  第 3 課：堆疊  "})
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "task-1", "source_name": "第 3 課：堆疊"}
+    assert tasks["task-1"].source_name == "第 3 課：堆疊"
+    with session_factory() as session:
+        assert session.get(task_record, "task-1").source_name == "第 3 課：堆疊"
+
+
+def test_rename_task_rejects_blank_name(tmp_path, monkeypatch):
+    tasks = {"task-1": SimpleNamespace(status="completed", source_name="old.mp4")}
+    client, session_factory, task_record = _watched_client(
+        tmp_path, monkeypatch, tasks
+    )
+
+    response = client.put("/tasks/task-1/name", json={"name": "   "})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "任務名稱不可為空"
+    assert tasks["task-1"].source_name == "old.mp4"
+    with session_factory() as session:
+        assert session.get(task_record, "task-1").source_name is None
+
+
+def test_rename_task_rejects_overlong_name(tmp_path, monkeypatch):
+    tasks = {"task-1": SimpleNamespace(status="completed", source_name="old.mp4")}
+    client, _, _ = _watched_client(tmp_path, monkeypatch, tasks)
+
+    assert client.put(
+        "/tasks/task-1/name", json={"name": "名" * 200}
+    ).status_code == 200
+    response = client.put("/tasks/task-1/name", json={"name": "名" * 201})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "任務名稱過長"
+    assert tasks["task-1"].source_name == "名" * 200
+
+
+def test_rename_task_returns_404_for_unknown_task(tmp_path, monkeypatch):
+    client, _, _ = _watched_client(tmp_path, monkeypatch, {})
+
+    response = client.put("/tasks/missing/name", json={"name": "x"})
+
+    assert response.status_code == 404
+
+
+def test_rename_task_keeps_memory_unchanged_when_database_fails(
+    tmp_path, monkeypatch
+):
+    tasks = {"task-1": SimpleNamespace(status="completed", source_name="old.mp4")}
+    client, _, _ = _watched_client(tmp_path, monkeypatch, tasks)
+    task_api = sys.modules["backend.services.task_api"]
+
+    def broken_session():
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(task_api, "SessionLocal", broken_session)
+
+    response = client.put("/tasks/task-1/name", json={"name": "new"})
+
+    assert response.status_code == 500
+    assert tasks["task-1"].source_name == "old.mp4"

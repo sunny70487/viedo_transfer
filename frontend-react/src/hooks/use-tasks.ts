@@ -38,6 +38,18 @@ export function useSetTaskWatched() {
   })
 }
 
+export function useRenameTask() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ taskId, name }: { taskId: string; name: string }) =>
+      api.renameTask(taskId, name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['tasks'] }),
+    onError: (err: Error) => {
+      toast('error', `重新命名失敗: ${err.message}`)
+    },
+  })
+}
+
 export function useDeleteAllFailedTasks() {
   const qc = useQueryClient()
   return useMutation({

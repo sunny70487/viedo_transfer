@@ -27,6 +27,7 @@ All successful transcription POSTs return `{"task_id": "<uuid>"}` (or `{"batch_i
 | GET    | `/tasks/{task_id}` | Single task snapshot |
 | GET    | `/tasks/{task_id}/stream` | SSE stream; emits JSON snapshot on change, closes on terminal status |
 | DELETE | `/tasks/{task_id}` | Cancel or delete a task |
+| PUT    | `/tasks/{task_id}/name` | Rename a task: body `{"name"}`, overwrites `source_name` (400 if blank or over 200 chars) |
 | DELETE | `/tasks/failed` | Bulk-delete all failed tasks |
 | GET    | `/tasks/batch/{batch_id}` | Aggregate status for a batch |
 
