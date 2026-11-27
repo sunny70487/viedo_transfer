@@ -8,8 +8,6 @@ from backend.services.transcription_progress import (
 
 
 def test_estimate_total_steps_uses_segment_count_when_split_enabled():
-    task = SimpleNamespace()
-
     steps = estimate_total_steps(
         split_segments=True,
         segment_duration=30,
@@ -66,7 +64,11 @@ def test_build_status_callback_segment_and_message_saves():
     callback = build_status_callback(
         task=task, save_task=lambda t: saved.append("saved")
     )
-    callback("new message", progress=50.0, segment={"start": 0.0, "end": 1.0, "text": "hi"})
+    callback(
+        "new message",
+        progress=50.0,
+        segment={"start": 0.0, "end": 1.0, "text": "hi"},
+    )
 
     assert task.message == "new message"
     assert task.partial_segments == [{"start": 0.0, "end": 1.0, "text": "hi"}]

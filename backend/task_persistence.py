@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Any
 
-from backend.database import SessionLocal, TaskRecord, FolderRecord, init_db
+from backend.database import SessionLocal, TaskRecord, init_db
 
 logger = logging.getLogger("task_persistence")
 

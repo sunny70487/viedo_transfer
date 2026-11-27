@@ -230,7 +230,7 @@ class SubtitleCollection(BaseModel):
         )
 
         # 移除舊字幕並插入新字幕
-        del self.subtitles[start_index : end_index + 1]
+        del self.subtitles[start_index:end_index + 1]
         self.subtitles.insert(start_index, merged_subtitle)
 
         # 重新編號

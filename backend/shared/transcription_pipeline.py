@@ -91,7 +91,7 @@ def write_output_files(
     verbose=False,
     show_in_terminal=False,
 ):
-    """Write .txt, .srt, .vtt, .json output files and return updated output_files dict."""
+    """Write .txt/.srt/.vtt/.json output files and return output_files dict."""
     txt_path = base_output_path / f"{base_filename}.txt"
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(transcript_parts))

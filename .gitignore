@@ -59,6 +59,6 @@ Thumbs.db
 /static/
 /templates/
 .cursor/
-docs/
+docs/superpowers/
 .pytest_cache/
 .superpowers/

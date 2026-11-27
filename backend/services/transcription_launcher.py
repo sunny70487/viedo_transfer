@@ -6,7 +6,15 @@ from concurrent.futures import Future, ThreadPoolExecutor
 logger = logging.getLogger("transcription_launcher")
 
 
-def create_task_entry(*, tasks, save_task, source_name, batch_id=None, folder_id=None, task_cls=None):
+def create_task_entry(
+    *,
+    tasks,
+    save_task,
+    source_name,
+    batch_id=None,
+    folder_id=None,
+    task_cls=None,
+):
     if task_cls is None:
         from backend.app import Task as task_cls
     task_id = str(uuid.uuid4())
