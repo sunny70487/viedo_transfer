@@ -12,7 +12,8 @@ import json
 import time
 import logging
 import re
-from typing import Dict, Any, List, Optional
+import uuid
+from typing import AsyncIterator, Dict, Any, Iterator, List, Optional
 from fastapi import APIRouter, HTTPException, Query, Path as FastAPIPath
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
@@ -401,12 +402,21 @@ def _read_task_output(task: Any, filename: str, missing_detail: str) -> str:
         return f.read()
 
 
-def _clear_concept_animations(task: Any, task_id: str) -> None:
-    """Delete SVG animations tied to a previous version of the notes."""
+def _clear_concept_animations(
+    task: Any, task_id: str, id_prefix: str = ""
+) -> None:
+    """Delete SVG animations tied to a previous version of the notes.
+
+    With *id_prefix* only animations whose id starts with it are removed
+    (e.g. ``"c02-"`` for one chapter).
+    """
     output_dir = _resolve_task_output_dir(task)
     if not output_dir:
         return
-    pattern = os.path.join(output_dir, f"{glob.escape(task_id)}_anim_*.svg")
+    pattern = os.path.join(
+        output_dir,
+        f"{glob.escape(task_id)}_anim_{glob.escape(id_prefix)}*.svg",
+    )
     for path in glob.glob(pattern):
         try:
             os.remove(path)
@@ -1185,33 +1195,473 @@ def _sse(payload: Dict[str, Any]) -> str:
     return f"data: {json.dumps(payload)}\n\n"
 
 
-@router.post("/{task_id}/generate-notes")
-def generate_notes_endpoint(
-    task_id: str = FastAPIPath(..., description="任務 ID"),
-    req: SummarizeRequest = ...,
-):
-    """Stream an illustrated Markdown study note (note-crafter style) via SSE.
+async def _close_when_abandoned(chunks: Iterator[str]) -> AsyncIterator[str]:
+    """Stream a sync generator and close it when the client goes away.
 
-    The note is persisted only after the whole stream succeeds; an error or
-    client disconnect leaves the previously saved note and animations intact.
+    Starlette iterates sync generators in a threadpool but never closes them
+    on disconnect, so the generator would stay suspended with its upstream
+    LLM request still open (and still generating) until garbage collection.
     """
-    from starlette.responses import StreamingResponse
+    import anyio
+    from starlette.concurrency import iterate_in_threadpool
 
-    tasks = get_tasks_storage()
+    try:
+        async for chunk in iterate_in_threadpool(chunks):
+            yield chunk
+    finally:
+        close = getattr(chunks, "close", None)
+        if close is not None:
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(close)
+
+
+_NOTES_OUTLINE = "_notes_outline.json"
+_NOTES_OUTLINE_DRAFT = "_notes_outline_draft.json"
+_NOTES_REFS = "_notes_refs.json"
+_NOTES_LINKED = "_notes_linked.json"
+_NOTES_LEGACY = "_study_notes.md"
+_CHAPTER_ID_RE = re.compile(r"^c\d{2}$")
+_REPLACE_ATTEMPTS = 3
+
+
+class StartStudyNotesRequest(BaseModel):
+    excluded_sections: List[str] = Field(default_factory=list)
+
+
+class NoteReferencesRequest(BaseModel):
+    text: str = Field("", max_length=200_000)
+    urls: List[str] = Field(default_factory=list)
+
+
+def _require_output_dir(task: Any) -> str:
+    output_dir = _resolve_task_output_dir(task)
+    if not output_dir:
+        raise HTTPException(status_code=404, detail="找不到輸出目錄")
+    return output_dir
+
+
+def _chapter_note_path(output_dir: str, task_id: str, chapter_id: str) -> str:
+    return os.path.join(output_dir, f"{task_id}_notes_ch_{chapter_id}.md")
+
+
+def _write_text_atomic(path: str, text: str) -> None:
+    """Write *text* so concurrent readers never see a partial file.
+
+    Raises OSError. On Windows ``os.replace`` fails while another request
+    has the target open for reading, hence the short retry.
+    """
+    tmp_path = f"{path}.{uuid.uuid4().hex}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(text)
+        for attempt in range(_REPLACE_ATTEMPTS):
+            try:
+                os.replace(tmp_path, path)
+                return
+            except PermissionError:
+                if attempt == _REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.05)
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _save_notes_file(path: str, text: str, failure_detail: str) -> None:
+    try:
+        _write_text_atomic(path, text)
+    except OSError as e:
+        logger.error("Could not save %s: %s", path, e, exc_info=True)
+        raise HTTPException(status_code=500, detail=failure_detail)
+
+
+def _remove_if_exists(path: str) -> None:
+    """Delete *path*; a missing file is fine. Raises OSError otherwise."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def _remove_quietly(path: str) -> None:
+    try:
+        _remove_if_exists(path)
+    except OSError as e:
+        logger.warning("Could not remove %s: %s", path, e)
+
+
+def _read_text_file(path: str) -> Optional[str]:
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read()
+    except OSError as e:
+        logger.warning("Could not read %s: %s", path, e)
+        return None
+
+
+def _load_outline(path: str) -> Optional[Dict[str, Any]]:
+    """Read a stored note outline in the current format.
+
+    Outlines saved before chapters had sections are upgraded in memory.
+    Returns None when the file is missing or not a usable outline.
+    """
+    from backend.shared import chapter_notes
+
+    raw = _read_text_file(path)
+    if raw is None:
+        return None
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Ignoring malformed outline file %s", path)
+        return None
+    return chapter_notes.upgrade_outline(data)
+
+
+def _load_references(output_dir: str, task_id: str) -> Dict[str, Any]:
+    raw = _read_text_file(os.path.join(output_dir, f"{task_id}{_NOTES_REFS}"))
+    try:
+        data = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    text = data.get("text")
+    sources = data.get("sources")
+    return {
+        "text": text if isinstance(text, str) else "",
+        "sources": [s for s in sources if isinstance(s, dict)]
+        if isinstance(sources, list) else [],
+    }
+
+
+def _load_linked_pages(path: str) -> Dict[str, Any]:
+    """Pages linked from the references that were fetched for some chapter."""
+    raw = _read_text_file(path)
+    try:
+        data = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        data = {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        url: page for url, page in data.items()
+        if isinstance(page, dict) and page.get("ok") and page.get("text")
+    }
+
+
+def _chapter_linked_pages(
+    output_dir: str,
+    task_id: str,
+    chapter: Dict[str, Any],
+    sources: List[Dict[str, Any]],
+    req: Any,
+) -> List[Dict[str, Any]]:
+    """
+    Pick and fetch the linked sub-pages one chapter should draw on.
+
+    Fetched pages are cached per task, so a page used by several chapters is
+    downloaded once. Never raises: linked pages are an optional extra and
+    the chapter must still be written when choosing or fetching them fails.
+    """
+    from backend.shared import chapter_notes, note_references
+
+    try:
+        candidates = note_references.candidate_links(sources)
+        if not candidates:
+            return []
+        picked = chapter_notes.select_linked_pages(
+            chapter,
+            candidates,
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+            content_hint=req.content_hint,
+        )
+        if not picked:
+            return []
+
+        cache_path = os.path.join(output_dir, f"{task_id}{_NOTES_LINKED}")
+        cache = _load_linked_pages(cache_path)
+        pages: List[Dict[str, Any]] = []
+        fetched = False
+        for link in picked:
+            page = cache.get(link["url"])
+            if page is None:
+                page = note_references.fetch_reference_url(
+                    link["url"], max_chars=None
+                )
+                if not page.get("ok"):
+                    logger.warning(
+                        "Linked page %s not used: %s",
+                        link["url"], page.get("error"),
+                    )
+                    continue
+                page.pop("links", None)
+                page["title"] = page.get("title") or link.get("title") or ""
+                cache[link["url"]] = page
+                fetched = True
+            pages.append(page)
+        if fetched:
+            # Other chapters fetch in parallel: merge with what they saved
+            # in the meantime instead of overwriting it.
+            merged = {**_load_linked_pages(cache_path), **cache}
+            _write_text_atomic(cache_path, json.dumps(merged, ensure_ascii=False))
+        return pages
+    except Exception as e:
+        logger.warning(
+            "Linked pages skipped for %s/%s: %s",
+            task_id, chapter.get("id"), e, exc_info=True,
+        )
+        return []
+
+
+def _transcript_segments(
+    task_id: str, tasks: Dict[str, Any]
+) -> List[Dict[str, Any]]:
     subtitle_data = SubtitleService.load_subtitle_data(task_id, tasks)
-    task = tasks[task_id]
-
-    segments = [
+    return [
         {"start": s.start_time, "end": s.end_time, "text": s.text}
         for s in subtitle_data.subtitles
     ]
 
+
+def _study_notes_state(task: Any, task_id: str) -> Dict[str, Any]:
+    """Everything the notes dialog needs: outline, draft, chapters, references."""
+    from backend.shared import chapter_notes, note_references
+
+    output_dir = _require_output_dir(task)
+    outline = _load_outline(os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE}"))
+    draft = _load_outline(
+        os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE_DRAFT}")
+    )
+    references = _load_references(output_dir, task_id)
+
+    chapters: List[Dict[str, Any]] = []
+    markdown = ""
+    if outline is not None:
+        written: Dict[str, str] = {}
+        for chapter in outline["chapters"]:
+            text = _read_text_file(
+                _chapter_note_path(output_dir, task_id, chapter["id"])
+            )
+            chapters.append({**chapter, "markdown": text})
+            if text:
+                written[chapter["id"]] = text
+        if written:
+            markdown = chapter_notes.assemble_notes(
+                outline, written, references["sources"]
+            )
+    else:
+        markdown = _read_text_file(
+            os.path.join(output_dir, f"{task_id}{_NOTES_LEGACY}")
+        ) or ""
+
+    return {
+        "markdown": markdown,
+        "outline": outline,
+        "draft_outline": draft,
+        "chapters": chapters,
+        "references": note_references.summarize_references(
+            references["text"], references["sources"]
+        ),
+    }
+
+
+@router.post("/{task_id}/study-notes/outline")
+def plan_study_notes_outline(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    req: SummarizeRequest = ...,
+):
+    """Plan the chapters of a study note and store them as a draft.
+
+    Nothing else is touched: the current note stays as it is until the
+    draft is adopted via ``/study-notes/start``.
+    """
+    from backend.shared import chapter_notes
+
+    tasks = get_tasks_storage()
+    segments = _transcript_segments(task_id, tasks)
+    output_dir = _require_output_dir(tasks[task_id])
+
+    try:
+        outline = chapter_notes.plan_note_outline(
+            segments,
+            api_key=req.api_key,
+            base_url=req.base_url,
+            model=req.model,
+            content_hint=req.content_hint,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    _save_notes_file(
+        os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE_DRAFT}"),
+        json.dumps(outline, ensure_ascii=False, indent=2),
+        "無法儲存章節規劃",
+    )
+    return {"outline": outline}
+
+
+@router.delete("/{task_id}/study-notes/outline")
+def discard_study_notes_outline(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+):
+    """Throw away the draft outline; the current note is not affected."""
+    output_dir = _require_output_dir(_require_task(task_id))
+    _remove_quietly(os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE_DRAFT}"))
+    return {"message": "已放棄章節規劃"}
+
+
+@router.put("/{task_id}/study-notes/references")
+def save_study_notes_references(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    req: NoteReferencesRequest = ...,
+):
+    """Store reference text and URLs; newly added URLs are fetched now."""
+    from backend.shared import note_references
+
+    output_dir = _require_output_dir(_require_task(task_id))
+    urls = list(dict.fromkeys(u.strip() for u in req.urls if u.strip()))
+    if len(urls) > note_references.MAX_REFERENCE_URLS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"參考網址最多 {note_references.MAX_REFERENCE_URLS} 個",
+        )
+
+    cached = _load_references(output_dir, task_id)["sources"]
+    sources = note_references.resolve_reference_sources(urls, cached)
+    _save_notes_file(
+        os.path.join(output_dir, f"{task_id}{_NOTES_REFS}"),
+        json.dumps(
+            {"text": req.text, "sources": sources}, ensure_ascii=False, indent=2
+        ),
+        "無法儲存參考資料",
+    )
+    return note_references.summarize_references(req.text, sources)
+
+
+@router.post("/{task_id}/study-notes/start")
+def start_study_notes(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    req: Optional[StartStudyNotesRequest] = None,
+):
+    """Adopt the draft outline, replacing the current note and its chapters.
+
+    ``excluded_sections`` lists sections the user unticked inside chapters
+    that will be written; they are kept in the outline but left out of the
+    chapter's transcript.
+
+    The outline is written first; if clearing the old chapters then fails
+    the draft is kept so the request can simply be repeated.
+    """
+    from backend.shared import chapter_notes
+
+    task = _require_task(task_id)
+    output_dir = _require_output_dir(task)
+    draft_path = os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE_DRAFT}")
+    draft = _load_outline(draft_path)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="沒有待採用的章節規劃")
+    draft = chapter_notes.apply_section_exclusions(
+        draft, req.excluded_sections if req else []
+    )
+
+    _save_notes_file(
+        os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE}"),
+        json.dumps(draft, ensure_ascii=False, indent=2),
+        "無法儲存章節規劃",
+    )
+    stale_chapters = glob.glob(
+        os.path.join(output_dir, f"{glob.escape(task_id)}_notes_ch_*.md")
+    )
+    try:
+        for path in stale_chapters:
+            _remove_if_exists(path)
+    except OSError as e:
+        logger.error(
+            "Could not clear old chapter notes for %s: %s",
+            task_id, e, exc_info=True,
+        )
+        raise HTTPException(status_code=500, detail="無法清除舊的章節筆記")
+
+    _clear_concept_animations(task, task_id)
+    _remove_quietly(os.path.join(output_dir, f"{task_id}{_NOTES_LEGACY}"))
+    _remove_quietly(os.path.join(output_dir, f"{task_id}{_NOTES_LINKED}"))
+    _remove_quietly(draft_path)
+    return _study_notes_state(task, task_id)
+
+
+@router.post("/{task_id}/study-notes/chapters/{chapter_id}")
+def generate_chapter_note_endpoint(
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+    chapter_id: str = FastAPIPath(..., description="章節 ID"),
+    req: SummarizeRequest = ...,
+):
+    """Stream one chapter of the study note via SSE and save it when done.
+
+    The chapter file is only replaced after the whole stream succeeds; an
+    error or client disconnect leaves the previous chapter and its
+    animations intact.
+    """
+    from starlette.responses import StreamingResponse
+
+    from backend.shared import chapter_notes, note_references
+
+    if not _CHAPTER_ID_RE.match(chapter_id):
+        raise HTTPException(status_code=400, detail="章節 ID 格式不正確")
+    tasks = get_tasks_storage()
+    task = _require_task(task_id)
+    output_dir = _require_output_dir(task)
+    outline_path = os.path.join(output_dir, f"{task_id}{_NOTES_OUTLINE}")
+    outline = _load_outline(outline_path)
+    if outline is None:
+        raise HTTPException(status_code=404, detail="尚未規劃章節")
+    chapter = next(
+        (c for c in outline["chapters"] if c["id"] == chapter_id), None
+    )
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章節不存在")
+
+    segments = _transcript_segments(task_id, tasks)
+    references = _load_references(output_dir, task_id)
+    chapter_path = _chapter_note_path(output_dir, task_id, chapter_id)
+
     def generate():
-        from backend.shared.llm_postprocess import generate_notes as _gen
+        # Choosing and fetching linked pages can take a while; it runs here
+        # so the response has already started and a client that leaves is
+        # noticed before the chapter itself is requested.
+        linked_pages = _chapter_linked_pages(
+            output_dir, task_id, chapter, references["sources"], req
+        )
+        linked_block, linked_used = note_references.build_linked_block(
+            linked_pages, chapter_notes.chapter_query(chapter)
+        )
+        reference_block, _, _ = note_references.build_reference_block(
+            references["text"],
+            references["sources"],
+            max_chars=(
+                note_references.MAX_DIRECT_CHARS_WITH_LINKS if linked_block
+                else note_references.MAX_REFERENCE_CHARS
+            ),
+        )
+        if linked_block:
+            reference_block = "\n\n".join(
+                block for block in (reference_block, linked_block) if block
+            )
+
         parts: List[str] = []
         try:
-            for piece in _gen(
+            for piece in chapter_notes.generate_chapter_note(
                 segments,
+                outline=outline,
+                chapter_id=chapter_id,
+                reference_block=reference_block,
                 api_key=req.api_key,
                 base_url=req.base_url,
                 model=req.model,
@@ -1224,30 +1674,49 @@ def generate_notes_endpoint(
             return
         except Exception as e:
             logger.error(
-                "generate-notes failed for %s: %s", task_id, e, exc_info=True
+                "chapter note failed for %s/%s: %s",
+                task_id, chapter_id, e, exc_info=True,
             )
             yield _sse({"type": "error", "message": "筆記生成失敗"})
             return
 
-        markdown = "".join(parts)
-        if markdown.strip():
-            _write_task_output(task, f"{task_id}_study_notes.md", markdown)
-            _clear_concept_animations(task, task_id)
-        yield _sse({"type": "done"})
+        footer = chapter_notes.linked_sources_footer(linked_used)
+        if footer:
+            parts.append(footer)
+            yield _sse({"type": "delta", "text": footer})
+        markdown = chapter_notes.finalize_chapter_markdown(
+            "".join(parts), chapter_id
+        )
+        if _load_outline(outline_path) != outline:
+            yield _sse({"type": "error", "message": "章節規劃已變更，請重新產生"})
+            return
+        try:
+            _write_text_atomic(chapter_path, markdown)
+        except OSError as e:
+            logger.error(
+                "Could not save chapter note %s: %s", chapter_path, e,
+                exc_info=True,
+            )
+            yield _sse({"type": "error", "message": "無法儲存章節筆記"})
+            return
+        _clear_concept_animations(task, task_id, f"{chapter_id}-")
+        yield _sse({"type": "done", "markdown": markdown})
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return StreamingResponse(
+        _close_when_abandoned(generate()), media_type="text/event-stream"
+    )
 
 
 @router.get("/{task_id}/study-notes")
 def get_study_notes(
     task_id: str = FastAPIPath(..., description="任務 ID"),
 ):
-    """Return the last fully generated study note as Markdown."""
-    task = _require_task(task_id)
-    markdown = _read_task_output(
-        task, f"{task_id}_study_notes.md", "尚未產生筆記"
-    )
-    return {"markdown": markdown}
+    """Return the study note state: outline, draft, chapters, references.
+
+    ``markdown`` is the assembled chapter note, or a note saved by the older
+    single-file format when no outline exists yet.
+    """
+    return _study_notes_state(_require_task(task_id), task_id)
 
 
 @router.post("/{task_id}/mindmap")

@@ -4,6 +4,7 @@ import type {
   RetranscribeRequest, RetranscribeTask,
   BatchResponse, LlmModel, Folder, FolderUploadResponse,
   LlmSummarizeRequest, Mindmap, ConceptAnimationRequest,
+  NoteOutline, NoteReferences, StudyNotesState, ChapterNoteEvent,
 } from '@/types/api'
 
 const BASE = ''
@@ -299,13 +300,41 @@ export const api = {
     }
   },
 
-  async *generateNotesStream(taskId: string, data: {
-    api_key: string
-    base_url: string
-    model: string
-    content_hint?: string
-  }, signal?: AbortSignal): AsyncGenerator<{ type: string; text?: string; message?: string }> {
-    const res = await fetch(`${BASE}/api/subtitles/${taskId}/generate-notes`, {
+  planNotesOutline(taskId: string, data: LlmSummarizeRequest, signal?: AbortSignal) {
+    return request<{ outline: NoteOutline }>(`/api/subtitles/${taskId}/study-notes/outline`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+      signal,
+    })
+  },
+
+  discardNotesOutline(taskId: string) {
+    return request<{ message: string }>(`/api/subtitles/${taskId}/study-notes/outline`, {
+      method: 'DELETE',
+    })
+  },
+
+  saveNoteReferences(taskId: string, data: { text: string; urls: string[] }) {
+    return request<NoteReferences>(`/api/subtitles/${taskId}/study-notes/references`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    })
+  },
+
+  startChapterNotes(taskId: string, excludedSections: string[]) {
+    return request<StudyNotesState>(`/api/subtitles/${taskId}/study-notes/start`, {
+      method: 'POST',
+      body: JSON.stringify({ excluded_sections: excludedSections }),
+    })
+  },
+
+  async *generateChapterNoteStream(
+    taskId: string,
+    chapterId: string,
+    data: LlmSummarizeRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChapterNoteEvent> {
+    const res = await fetch(`${BASE}/api/subtitles/${taskId}/study-notes/chapters/${chapterId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -327,21 +356,20 @@ export const api = {
       buffer = lines.pop() || ''
       for (const line of lines) {
         if (line.startsWith('data: ')) {
-          yield JSON.parse(line.slice(6))
+          yield JSON.parse(line.slice(6)) as ChapterNoteEvent
         }
       }
     }
   },
 
-  async getStudyNotes(taskId: string): Promise<string | null> {
+  async getStudyNotes(taskId: string): Promise<StudyNotesState | null> {
     const res = await fetch(`${BASE}/api/subtitles/${taskId}/study-notes`)
     if (res.status === 404) return null
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
       throw new Error(body.detail || `Request failed: ${res.status}`)
     }
-    const body = (await res.json()) as { markdown: string }
-    return body.markdown
+    return (await res.json()) as StudyNotesState
   },
 
   generateMindmap(taskId: string, data: LlmSummarizeRequest) {

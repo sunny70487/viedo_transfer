@@ -133,12 +133,6 @@ def test_generate_mindmap_wraps_api_errors(monkeypatch):
         lp.generate_mindmap(SEGMENTS, api_key="k")
 
 
-def test_notes_prompts_request_concept_anim_blocks():
-    assert "```concept-anim" in lp._NOTES_SYSTEM_PROMPT
-    assert "concept-anim" in lp._NOTES_REQUIREMENTS
-    assert "Mermaid" in lp._NOTES_REQUIREMENTS
-
-
 def test_concept_svg_prompt_enforces_3b1b_style():
     prompt = lp._CONCEPT_SVG_SYSTEM_PROMPT
     for token in ("#0f172a", "#38bdf8", "#fbbf24", "stroke-dashoffset",

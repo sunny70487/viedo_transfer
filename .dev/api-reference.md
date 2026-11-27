@@ -54,6 +54,14 @@ All successful transcription POSTs return `{"task_id": "<uuid>"}` (or `{"batch_i
 | POST   | `/api/subtitles/enhance` | SSE: LLM-enhance or translate subtitles |
 | POST   | `/api/subtitles/{task_id}/summarize` | Generate summary + chapter notes |
 | GET    | `/api/subtitles/{task_id}/notes` | Retrieve previously saved notes |
+| GET    | `/api/subtitles/{task_id}/study-notes` | Study-note state: `{markdown, outline, draft_outline, chapters[], references}`. `markdown` is the assembled chapter note, or a legacy single-file note when no outline exists |
+| POST   | `/api/subtitles/{task_id}/study-notes/outline` | Plan the note with the LLM and store it as a draft only (body: `api_key`, `base_url`, `model`, `content_hint`). Cuts the transcript into sections, then groups them into topic chapters (`chapters[].sections[]`, course admin in a last `kind: "logistics"` chapter). 502 on LLM/format error; a failed grouping returns `grouped: false` instead |
+| DELETE | `/api/subtitles/{task_id}/study-notes/outline` | Discard the draft outline |
+| PUT    | `/api/subtitles/{task_id}/study-notes/references` | Save reference text + up to 5 URLs (`{text, urls}`); new URLs are fetched during the request |
+| POST   | `/api/subtitles/{task_id}/study-notes/start` | Adopt the draft: replaces the outline and deletes old chapter notes, concept animations and the legacy note; 404 without a draft. Optional body `{"excluded_sections": ["s004"]}` marks sections to leave out of their chapter |
+| POST   | `/api/subtitles/{task_id}/study-notes/chapters/{chapter_id}` | SSE: write one chapter (`delta` / `done` with saved markdown / `error`); saved only when the stream completes. Before writing, picks up to 2 sub-pages linked from the reference pages, fetches them (cached in `{task}_notes_linked.json`) and adds their relevant passages; the chapter ends with a "本章延伸閱讀" line |
+
+`POST /api/subtitles/{task_id}/generate-notes` (single-shot note) was removed on 2026-11-25; the frontend requests chapters individually, at most 3 at a time.
 
 ## Folders (`backend/services/folder_api.py`, prefix `/api/folders`)
 

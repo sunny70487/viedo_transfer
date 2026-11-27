@@ -93,6 +93,34 @@ Load path prefers `<id>_updated.json` over the original engine output. Don't byp
 | Summarize + chapterize | `backend/shared/llm_postprocess.py:summarize_subtitles(segments, *, api_key, base_url, model, content_hint=None)` |
 | Rewrite localhost URL (Docker) | `backend/shared/llm_postprocess.py:_rewrite_localhost_url(url)` (private; mirror in `app.py`) |
 
+## I need to build chapter-based study notes
+
+| Intent | Use |
+|---|---|
+| Plan the chapters of a note from a transcript | `backend/shared/chapter_notes.py:plan_note_outline(segments, *, api_key, base_url, model, content_hint=None)` |
+| Clean the LLM's section list (ids `s001`.., contiguous ranges, split/merge) | `backend/shared/chapter_notes.py:normalize_sections(raw_sections, segments)` |
+| Group sections into topic chapters + a logistics chapter | `backend/shared/chapter_notes.py:build_outline(sections, grouping, segments, *, title="", overview="")` |
+| Validate a stored outline / upgrade the old flat format | `backend/shared/chapter_notes.py:upgrade_outline(data)` |
+| Mark sections the user unticked | `backend/shared/chapter_notes.py:apply_section_exclusions(outline, excluded_ids)` |
+| Transcript a chapter is written from (labelled per section) | `backend/shared/chapter_notes.py:chapter_transcript(segments, outline, chapter)` |
+| Transcript segments belonging to one section | `backend/shared/chapter_notes.py:slice_section_segments(segments, section, *, is_last)` |
+| Stream one chapter as Markdown | `backend/shared/chapter_notes.py:generate_chapter_note(segments, *, outline, chapter_id, reference_block="", api_key, base_url, model, content_hint=None)` |
+| Make a finished chapter safe to store (anim ids, open fences) | `backend/shared/chapter_notes.py:finalize_chapter_markdown(markdown, chapter_id)` |
+| Join saved chapters into one document | `backend/shared/chapter_notes.py:assemble_notes(outline, chapter_markdowns, sources)` |
+| Check a reference URL is http(s) and not internal | `backend/shared/note_references.py:validate_reference_url(url)` |
+| Download a page and extract readable text (never raises) | `backend/shared/note_references.py:fetch_reference_url(url, *, timeout=10.0, max_bytes=2_000_000)` |
+| Extract title + text from HTML | `backend/shared/note_references.py:extract_readable_text(html)` |
+| Reuse cached sources, fetch only new URLs | `backend/shared/note_references.py:resolve_reference_sources(urls, cached)` |
+| Same-site links of a page, each with its description | `backend/shared/note_references.py:extract_page_links(html, base_url)` |
+| Sub-pages a chapter may read (all sources, deduplicated) | `backend/shared/note_references.py:candidate_links(sources)` |
+| Keep the passages of a long text related to a query (keyword matching) | `backend/shared/note_references.py:select_passages(text, query, *, max_chars)` |
+| `<reference>` block for linked sub-pages | `backend/shared/note_references.py:build_linked_block(pages, query, *, max_chars=12_000)` |
+| Ask the LLM which linked pages a chapter should read (never raises) | `backend/shared/chapter_notes.py:select_linked_pages(chapter, candidates, *, api_key, base_url, model, content_hint=None, limit=2)` |
+| Words describing a chapter, for passage matching | `backend/shared/chapter_notes.py:chapter_query(chapter)` |
+| Budgeted `<reference>` block for a prompt | `backend/shared/note_references.py:build_reference_block(text, sources, *, max_chars=20_000)` |
+| Reference summary for the UI (no page text) | `backend/shared/note_references.py:summarize_references(text, sources)` |
+| Stream a sync generator and close it on client disconnect | `backend/services/subtitle_api.py:_close_when_abandoned(chunks)` (private) |
+
 ## I need to manage folders
 
 | Intent | Use |

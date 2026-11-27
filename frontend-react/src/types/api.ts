@@ -78,6 +78,73 @@ export interface LlmSummarizeRequest {
   content_hint?: string
 }
 
+export type NoteImportance = 'core' | 'supplementary' | 'optional'
+
+/** A time-ordered slice of the recording about one thing. */
+export interface NoteSection {
+  id: string
+  title: string
+  start: number
+  end: number
+  summary: string
+  importance: NoteImportance
+  /** Left out of its chapter's note by the user. */
+  excluded?: boolean
+}
+
+/** A topic made of sections that may be far apart in the recording. */
+export interface NoteChapter {
+  id: string
+  title: string
+  summary: string
+  importance: NoteImportance
+  /** 'logistics' = course admin and chit-chat, not written by default. */
+  kind: 'topic' | 'logistics'
+  sections: NoteSection[]
+}
+
+export interface NoteOutline {
+  title: string
+  overview: string
+  /** false = sections could not be grouped; each one is its own chapter. */
+  grouped: boolean
+  chapters: NoteChapter[]
+}
+
+export interface NoteChapterState extends NoteChapter {
+  markdown: string | null
+}
+
+export interface NoteReferenceSource {
+  url: string
+  title: string
+  chars: number
+  ok: boolean
+  error: string
+  /** Same-site pages this page links to; chapters may read the relevant ones. */
+  links: number
+}
+
+export interface NoteReferences {
+  text: string
+  sources: NoteReferenceSource[]
+  used_chars: number
+  truncated: boolean
+}
+
+export interface StudyNotesState {
+  markdown: string
+  outline: NoteOutline | null
+  draft_outline: NoteOutline | null
+  chapters: NoteChapterState[]
+  references: NoteReferences
+}
+
+export type ChapterNoteEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'done'; markdown: string }
+  | { type: 'error'; message: string }
+
 export interface MindmapNode {
   title: string
   time: number

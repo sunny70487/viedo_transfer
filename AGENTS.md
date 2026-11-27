@@ -82,6 +82,8 @@ Persistence: SQLite in dev (`tasks.db`), PostgreSQL in Docker (via `DATABASE_URL
 | `backend/shared/split_audio_helpers.py` | Split long audio into segments |
 | `backend/shared/text_processing.py` | Post-processing text utilities |
 | `backend/shared/llm_postprocess.py` | OpenAI-compatible subtitle enhance + summarize |
+| `backend/shared/chapter_notes.py` | Chapter-based study notes: outline planning, per-chapter streaming, assembly |
+| `backend/shared/note_references.py` | Reference sources for notes: URL validation (no internal hosts), page text extraction, prompt budget |
 | `frontend-react/src/App.tsx` | Router + React Query root |
 | `frontend-react/src/api/client.ts` | All REST + SSE + streaming calls |
 | `frontend-react/src/stores/` | Zustand stores: `editor-store`, `theme-store`, `toast-store` |
