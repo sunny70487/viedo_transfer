@@ -27,7 +27,23 @@ logger = logging.getLogger("database")
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_SQLITE_URL = f"sqlite:///{_PROJECT_ROOT / 'tasks.db'}"
 
-DATABASE_URL = os.environ.get("DATABASE_URL", _DEFAULT_SQLITE_URL)
+
+
+def normalize_database_url(url: str) -> str:
+    """Pin bare PostgreSQL URLs to the installed psycopg2 driver.
+
+    SQLAlchemy 2.1 changed the default driver for ``postgresql://`` from
+    psycopg2 to psycopg (v3), which is not installed.
+    """
+    for prefix in ("postgresql://", "postgres://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg2://" + url[len(prefix):]
+    return url
+
+
+DATABASE_URL = normalize_database_url(
+    os.environ.get("DATABASE_URL", _DEFAULT_SQLITE_URL)
+)
 
 _connect_args = {}
 if DATABASE_URL.startswith("sqlite"):

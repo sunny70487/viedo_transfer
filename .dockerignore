@@ -46,6 +46,17 @@ faster-whisper-large-v3-zh-TW/
 .trellis/
 .claude/
 
+# 開發用資料（image 只 COPY backend/ 與 frontend-react/，這些只會拖慢 build context 傳輸）
+.dev/
+.omo/
+.opencode/
+.codegraph/
+.cursor/
+note/
+pretrained_models/
+tasks.db
+*.log
+
 # Tests (not needed in production image)
 tests/
 

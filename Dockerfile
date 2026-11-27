@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # ============================================================
 # Qwen3-ASR 轉錄工具 — GPU-enabled Docker image
 # Multi-stage: Node.js (React build) → CUDA + Python (backend)
@@ -9,7 +10,9 @@ FROM node:22-alpine AS frontend-build
 WORKDIR /build
 
 COPY frontend-react/package.json frontend-react/package-lock.json ./
-RUN npm ci
+# npm 下載快取保留在 BuildKit cache mount，lock 檔變動時不必重新下載全部套件
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --prefer-offline --no-audit --no-fund
 
 COPY frontend-react/ ./
 RUN npm run build
@@ -33,24 +36,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && ln -sf /usr/bin/python3.11 /usr/bin/python \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+# pip 下載快取放在 BuildKit cache mount（不進 image）：requirements.txt 變動
+# 導致下列 layer 重跑時，torch / CUDA wheel（數 GB）直接從快取安裝，不重新下載。
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade pip setuptools wheel
 
 WORKDIR /app
 
 # ---- Python 依賴（分層快取）----
+# torch / torchaudio 以 constraints 釘在 CUDA 12.1 版，第一次解析就裝對，
+# 不必先裝 CPU/cu13 版再整包強制重裝（省約 5 分鐘與約 5GB image 空間）。
 COPY backend/requirements.txt .
-RUN grep -v "pywin32" requirements.txt > /tmp/requirements_linux.txt \
-    && pip install --no-cache-dir -r /tmp/requirements_linux.txt \
-    && rm /tmp/requirements_linux.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    grep -v "pywin32" requirements.txt > /tmp/requirements_linux.txt \
+    && printf 'torch==2.5.1+cu121\ntorchaudio==2.5.1+cu121\n' > /tmp/constraints.txt \
+    && pip install -r /tmp/requirements_linux.txt -c /tmp/constraints.txt \
+        --extra-index-url https://download.pytorch.org/whl/cu121 \
+    && rm /tmp/requirements_linux.txt /tmp/constraints.txt
 
 # FireRedVAD（語音活動檢測）；--no-deps 是必要的：其 pyproject.toml 釘死
 # torch==2.10.0 / transformers==5.1.0，會覆蓋下方的 CUDA torch 並破壞 qwen-asr。
 # 模型權重不打包進 image，首次使用時自動下載至 /app/models（volume）。
-RUN pip install --no-cache-dir --no-deps \
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-deps \
         git+https://github.com/FireRedTeam/FireRedASR2S.git
-
-# 強制覆蓋為 CUDA 版 PyTorch（pip 預設裝的是 CPU 版，其他套件的依賴也會拉 CPU 版）
-RUN pip install --no-cache-dir --force-reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # ---- 應用程式碼 ----
 COPY backend/ ./backend/
