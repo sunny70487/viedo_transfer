@@ -477,6 +477,56 @@ async def head_subtitles(task_id: str = FastAPIPath(..., description="任務 ID"
     raise HTTPException(status_code=404, detail="找不到字幕資料")
 
 
+class ResegmentRequest(BaseModel):
+    glossary: Optional[str] = None
+
+
+def _resegment_from_original(task: Any, glossary: Optional[str]) -> List[Dict]:
+    from backend.shared.subtitle_postprocess import rebuild_saved_segments
+
+    json_path = (task.result.get("files") or {}).get("json")
+    if not json_path or not os.path.exists(json_path):
+        raise HTTPException(status_code=404, detail="找不到原始轉錄資料")
+    with open(json_path, "r", encoding="utf-8") as f:
+        segments = json.load(f).get("segments") or []
+
+    rebuilt = rebuild_saved_segments(segments, glossary=glossary)
+    if not rebuilt:
+        raise HTTPException(
+            status_code=400, detail="這份字幕沒有字級時間戳，無法重新斷句"
+        )
+    return [
+        Subtitle(
+            index=i,
+            start_time=seg["start"],
+            end_time=seg["end"],
+            text=seg["text"],
+            words=[
+                Word(word=w["word"], start=w["start"], end=w["end"])
+                for w in seg["words"]
+            ],
+        ).model_dump()
+        for i, seg in enumerate(rebuilt)
+        if seg["text"].strip()
+    ]
+
+
+@router.post("/{task_id}/resegment")
+async def resegment_subtitles(
+    req: ResegmentRequest,
+    task_id: str = FastAPIPath(..., description="任務 ID"),
+):
+    """依原始字級時間戳重新斷句並套用術語表；不重跑辨識，也不寫檔。"""
+    from starlette.concurrency import run_in_threadpool
+
+    task = _require_task(task_id)
+    if task.status != "completed" or not task.result:
+        raise HTTPException(status_code=400, detail="任務尚未完成或沒有結果")
+    subtitles = await run_in_threadpool(_resegment_from_original, task, req.glossary)
+    logger.info("Resegmented %s: %d lines", task_id, len(subtitles))
+    return {"subtitles": subtitles}
+
+
 @router.get("/{task_id}/download/{format}")
 async def download_subtitles(
     task_id: str = FastAPIPath(..., description="任務 ID"),

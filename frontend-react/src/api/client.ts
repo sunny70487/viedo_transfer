@@ -1,6 +1,6 @@
 import type {
   Task, GpuInfo, DirectoryInfo, SubdirectoryItem,
-  SubtitleCollection, TranscriptionRequest,
+  Subtitle, SubtitleCollection, TranscriptionRequest,
   RetranscribeRequest, RetranscribeTask,
   BatchResponse, LlmModel, Folder, FolderUploadResponse,
   LlmSummarizeRequest, Mindmap, ConceptAnimationRequest,
@@ -148,6 +148,13 @@ export const api = {
     return request<{ retranscribe_task_id: string; message: string; status: string }>(
       `/api/subtitles/${taskId}/retranscribe`, { method: 'POST', body: JSON.stringify(data) }
     )
+  },
+
+  resegmentSubtitles(taskId: string, glossary: string) {
+    return request<{ subtitles: Subtitle[] }>(`/api/subtitles/${taskId}/resegment`, {
+      method: 'POST',
+      body: JSON.stringify({ glossary: glossary.trim() || null }),
+    })
   },
 
   getRetranscribeTask(retranscribeTaskId: string) {

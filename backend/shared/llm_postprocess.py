@@ -12,6 +12,13 @@ import time
 from collections import deque
 from typing import Any, Callable, Dict, List, Optional
 
+from backend.shared.subtitle_segmentation import (
+    attach_punctuation,
+    is_word_char,
+    segment_text,
+    segment_words,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -268,11 +275,12 @@ def _call_llm(
 
 _BREAK_PUNCT = set("，。？！：；、?!,;:")
 _SENTENCE_PARTICLES = set("呢嗎啊吧呀哦哇啦囉喔嘛咧耶噢")
-_ALL_BREAKS = _BREAK_PUNCT | _SENTENCE_PARTICLES
 
 _TARGET_CHARS = 20
 _MAX_CHARS = 30
 _ORPHAN_THRESHOLD = 12
+_MERGE_MAX_GAP = 1.0
+_PARTICLE_BREAK_GAP = 0.3
 _TRAILING_STRIP_PUNCT = set("、；;")
 
 
@@ -296,55 +304,54 @@ def _split_at_punctuation(
     target_chars: int = _TARGET_CHARS,
     max_chars: int = _MAX_CHARS,
 ) -> List[Dict[str, Any]]:
-    """Split *text* at punctuation boundaries with proportional timestamps."""
-    total = len(text)
-    if total <= max_chars:
+    """Split *text* at punctuation / word boundaries with proportional timestamps."""
+    if len(text) <= max_chars:
         return [{"start": start_time, "end": end_time, "text": text}]
+    return segment_text(
+        text, start_time, end_time, max_chars=max_chars, target_chars=target_chars
+    ) or [{"start": start_time, "end": end_time, "text": text}]
 
-    duration = end_time - start_time
 
-    pieces: List[str] = []
-    pos = 0
-    last_punct = -1
+def _words_match_text(words: List[Dict[str, Any]], text: str) -> bool:
+    """True when *words* still spell *text* (i.e. text was not rewritten)."""
+    spelled = "".join(w.get("word", "") for w in words)
+    letters = [ch for ch in text if is_word_char(ch)]
+    return bool(words) and [ch for ch in spelled if is_word_char(ch)] == letters
 
-    for i, ch in enumerate(text):
-        if ch in _ALL_BREAKS:
-            last_punct = i + 1
-            if last_punct - pos >= target_chars:
-                pieces.append(text[pos:last_punct])
-                pos = last_punct
-                last_punct = -1
 
-        if i + 1 - pos >= max_chars and last_punct > pos:
-            pieces.append(text[pos:last_punct])
-            pos = last_punct
-            last_punct = -1
+def _split_segment(
+    seg: Dict[str, Any], target_chars: int, max_chars: int
+) -> List[Dict[str, Any]]:
+    """Split one over-long segment, using its word timings when still valid."""
+    text = seg.get("text", "").strip()
+    start = seg.get("start", 0.0)
+    end = seg.get("end", start)
+    words = seg.get("words") or []
+    if not _words_match_text(words, text):
+        return _split_at_punctuation(text, start, end, target_chars, max_chars)
 
-    if pos < total:
-        tail = text[pos:]
-        if pieces and len(tail) <= target_chars // 3:
-            pieces[-1] += tail
-        else:
-            pieces.append(tail)
+    pieces = segment_words(
+        attach_punctuation(words, text),
+        max_chars=max_chars,
+        target_chars=target_chars,
+    )
+    return [
+        {
+            **seg,
+            "start": piece["start"],
+            "end": piece["end"],
+            "text": piece["text"],
+            "words": piece["words"],
+        }
+        for piece in pieces
+        if piece["text"]
+    ]
 
-    for j in range(1, len(pieces)):
-        while pieces[j] and pieces[j][0] in _ALL_BREAKS:
-            pieces[j - 1] += pieces[j][0]
-            pieces[j] = pieces[j][1:]
 
-    result: List[Dict[str, Any]] = []
-    char_pos = 0
-    for piece in pieces:
-        stripped = piece.strip()
-        if not stripped:
-            char_pos += len(piece)
-            continue
-        t0 = start_time + (char_pos / total) * duration if total else start_time
-        char_pos += len(piece)
-        t1 = start_time + (char_pos / total) * duration if total else end_time
-        result.append({"start": round(t0, 3), "end": round(t1, 3), "text": stripped})
-
-    return result if result else [{"start": start_time, "end": end_time, "text": text}]
+def _all_word_timed(segments: List[Dict[str, Any]]) -> bool:
+    return all(
+        _words_match_text(s.get("words") or [], s.get("text", "")) for s in segments
+    )
 
 
 def merge_short_segments(
@@ -360,12 +367,18 @@ def merge_short_segments(
              (≤ 3 chars unconditionally, ≤ 12 chars when previous
              doesn't end with punctuation) into the previous segment.
 
-    Step 2 — Resplit: any segment exceeding *max_chars* is split
-             at the nearest punctuation mark, targeting *target_chars*
-             per line. Timestamps are distributed proportionally.
+    Step 2 — Resplit: any segment exceeding *max_chars* is split at
+             punctuation / word boundaries, targeting *target_chars* per line.
+
+    Segments whose word timings still match their text were already laid
+    out by ``segment_words`` at transcription time, so step 1 is skipped.
+    A silence of ``_MERGE_MAX_GAP`` seconds or more is never merged across.
     """
     if not segments or len(segments) <= 1:
         return list(segments)
+
+    if _all_word_timed(segments):
+        return resplit_long_segments(segments, target_chars, max_chars)
 
     # --- Step 1: orphan merge ---
     merged: List[Dict[str, Any]] = [dict(segments[0])]
@@ -378,8 +391,15 @@ def merge_short_segments(
         if not curr_text:
             continue
 
+        gap = seg.get("start", 0.0) - prev.get("end", 0.0)
+        if gap >= _MERGE_MAX_GAP:
+            merged.append(dict(seg))
+            continue
+
         last_char = prev_text[-1] if prev_text else ""
-        is_break = last_char in _ALL_BREAKS
+        is_break = last_char in _BREAK_PUNCT or (
+            last_char in _SENTENCE_PARTICLES and gap >= _PARTICLE_BREAK_GAP
+        )
 
         force = len(curr_text) <= 3 and prev_text
         orphan = (
@@ -424,11 +444,7 @@ def resplit_long_segments(
         if len(text) <= max_chars:
             result.append(dict(seg))
         else:
-            start = seg.get("start", 0.0)
-            end = seg.get("end", start)
-            result.extend(
-                _split_at_punctuation(text, start, end, target_chars, max_chars)
-            )
+            result.extend(_split_segment(seg, target_chars, max_chars))
 
     result = _strip_trailing_punct(result)
     for i, s in enumerate(result):

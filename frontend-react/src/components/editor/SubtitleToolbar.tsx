@@ -1,5 +1,5 @@
 import { useRef } from 'react'
-import { Undo2, Redo2, Save, Download, Upload, Search, RotateCcw, Sparkles, FileText } from 'lucide-react'
+import { Undo2, Redo2, Save, Download, Upload, Search, RotateCcw, Sparkles, FileText, Scissors } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { useEditorStore } from '@/stores/editor-store'
@@ -12,12 +12,13 @@ interface SubtitleToolbarProps {
   onExport: () => void
   onEnhance: () => void
   onGenerateNotes: () => void
+  onResegment: () => void
   onImport: (subs: Subtitle[]) => void
   saving?: boolean
   disabled?: boolean
 }
 
-export function SubtitleToolbar({ onSave, onExport, onEnhance, onGenerateNotes, onImport, saving, disabled }: Readonly<SubtitleToolbarProps>) {
+export function SubtitleToolbar({ onSave, onExport, onEnhance, onGenerateNotes, onResegment, onImport, saving, disabled }: Readonly<SubtitleToolbarProps>) {
   const { isDirty, searchTerm, setSearchTerm, undo, redo, resetToOriginal, historyIndex, history } = useEditorStore()
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -77,6 +78,10 @@ export function SubtitleToolbar({ onSave, onExport, onEnhance, onGenerateNotes, 
         <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={disabled} title="匯入字幕檔 (SRT/VTT/ASS)">
           <Upload className="h-4 w-4" />
           匯入
+        </Button>
+        <Button variant="outline" size="sm" onClick={onResegment} disabled={disabled} title="依原始字級時間重新斷句並套用術語表（不重跑辨識）">
+          <Scissors className="h-4 w-4" />
+          重新產生
         </Button>
         <Button variant="outline" size="sm" onClick={onEnhance} disabled={disabled} title="AI 字幕增強 / 翻譯">
           <Sparkles className="h-4 w-4" />

@@ -8,7 +8,10 @@ import re
 try:
     from opencc import OpenCC
 
-    _S2TW_CONVERTER = OpenCC("s2twp")
+    # s2tw is character-level only. s2twp also swaps mainland vocabulary for
+    # Taiwan terms (调试→除錯, 进程→程序, 扩展→擴充套件), which changes what the
+    # speaker said and breaks the 1:1 link between text and word timestamps.
+    _S2TW_CONVERTER = OpenCC("s2tw")
     OPENCC_AVAILABLE = True
 except ImportError:
     _S2TW_CONVERTER = None
@@ -20,10 +23,45 @@ _SUBTITLE_PUNCTUATION = re.compile(
 
 
 def convert_to_traditional(text: str) -> str:
-    """將簡體中文轉換為臺灣繁體中文（含詞彙轉換）。若 opencc 不可用則原樣返回。"""
+    """將簡體中文逐字轉為臺灣繁體字形（不替換詞彙）。若 opencc 不可用則原樣返回。"""
     if OPENCC_AVAILABLE and _S2TW_CONVERTER is not None:
         return _S2TW_CONVERTER.convert(text)
     return text
+
+
+def convert_segment_to_traditional(seg: dict) -> dict:
+    """Convert a segment's text and its words with one shared conversion.
+
+    The whole text is converted once (so context-dependent characters such
+    as 汇→彙/匯 come out the same everywhere) and each word takes its
+    characters from that result, keeping words and text letter-for-letter
+    identical. Returns a new dict; the input is not mutated.
+    """
+    text = seg.get("text", "")
+    converted = convert_to_traditional(text)
+    words = seg.get("words") or []
+    if len(converted) != len(text):
+        new_words = [dict(w, word=convert_to_traditional(w.get("word", "")))
+                     for w in words]
+        return dict(seg, text=converted, words=new_words)
+
+    letter_map = [converted[i] for i, ch in enumerate(text) if ch.isalnum()]
+    new_words = []
+    pos = 0
+    for w in words:
+        word = w.get("word", "")
+        out = []
+        for ch in word:
+            if ch.isalnum() and pos < len(letter_map):
+                out.append(letter_map[pos])
+                pos += 1
+            else:
+                out.append(convert_to_traditional(ch))
+        new_words.append(dict(w, word="".join(out)))
+    if pos != len(letter_map):
+        new_words = [dict(w, word=convert_to_traditional(w.get("word", "")))
+                     for w in words]
+    return dict(seg, text=converted, words=new_words)
 
 
 def strip_punctuation(text: str) -> str:

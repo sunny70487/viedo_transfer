@@ -1,2 +1,6 @@
 pytest>=8.3.0
 flake8>=7.0.0
+# Needed by subtitle segmentation tests (also in backend/requirements.txt)
+jieba>=0.42.1
+opencc-python-reimplemented>=0.1.7
+pypinyin>=0.51.0

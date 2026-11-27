@@ -9,11 +9,12 @@ Drop-in replacement for funasr_transcribe with the same public API:
     check_gpu()            → GPU info dict
     download_from_url(...) → (file_path, folder_path)
 
-Utility functions (download_from_url, check_gpu, split_audio, format_timestamp,
-_convert_to_traditional, _split_long_segments) are
-re-used from funasr_transcribe to avoid duplication.
+Utility functions (download_from_url, check_gpu, split_audio, format_timestamp)
+and subtitle post-processing (backend.shared.subtitle_postprocess) are shared
+with the other engines and the subtitle editor.
 """
 
+import logging
 import time
 import threading
 
@@ -21,13 +22,9 @@ import torch
 
 # ---- Re-use shared utilities ----
 from backend.shared.download_helpers import download_from_url  # noqa: F401 — re-exported
-from backend.shared.text_processing import (
-    convert_to_traditional as _convert_to_traditional,
-    smart_strip_punctuation as _smart_strip_punctuation,
-    split_long_segments as _split_long_segments,
-    _join_words_text,
-)
 from backend.shared.asr_context import build_asr_context
+from backend.shared.subtitle_postprocess import postprocess_segments
+from backend.shared.subtitle_segmentation import attach_punctuation
 from backend.shared.split_audio_helpers import split_audio, split_audio_by_vad
 from backend.shared.transcribe_helpers import format_timestamp
 from backend.shared.transcription_pipeline import (
@@ -38,6 +35,8 @@ from backend.shared.transcription_pipeline import (
     write_output_files,
 )
 from backend.shared.video_utils import maybe_prepare_video_output
+
+logger = logging.getLogger("qwen3_asr_transcribe")
 
 # ============================================================
 # Qwen3-ASR model name mapping
@@ -104,6 +103,64 @@ def _resolve_language(language) -> str | None:
     return _LANG_CODE_TO_NAME.get(language, language)
 
 
+# qwen_asr cuts its input into chunks of at most this many seconds and runs
+# one generate() per chunk (mirrors MAX_FORCE_ALIGN_INPUT_SECONDS /
+# MAX_ASR_INPUT_SECONDS in qwen_asr.inference.utils).
+_FALLBACK_ALIGN_CHUNK_SECONDS = 180
+_FALLBACK_ASR_CHUNK_SECONDS = 1200
+
+# Dense speech measured ~5-6 tokens/s; 10 leaves headroom for fast talkers
+# and mixed CJK/English text. A too-small budget silently drops the tail of
+# every chunk, which showed up as 10-20 s subtitle gaps on long lectures.
+_TOKENS_PER_SECOND_BUDGET = 10
+
+# Output this close to the cap was almost certainly cut off by it.
+_TRUNCATION_MARGIN_TOKENS = 16
+
+
+def _max_chunk_seconds(word_timestamps: bool) -> int:
+    """Longest audio span qwen_asr feeds to a single generate() call."""
+    try:
+        from qwen_asr.inference import utils as qwen_utils
+
+        if word_timestamps:
+            return int(qwen_utils.MAX_FORCE_ALIGN_INPUT_SECONDS)
+        return int(qwen_utils.MAX_ASR_INPUT_SECONDS)
+    except Exception:
+        if word_timestamps:
+            return _FALLBACK_ALIGN_CHUNK_SECONDS
+        return _FALLBACK_ASR_CHUNK_SECONDS
+
+
+def _max_new_tokens_for(word_timestamps: bool) -> int:
+    """Token budget large enough that no chunk can be cut short."""
+    return _max_chunk_seconds(word_timestamps) * _TOKENS_PER_SECOND_BUDGET
+
+
+def _output_hit_token_limit(model, text: str) -> bool:
+    """True when ``text`` is long enough that generation hit max_new_tokens."""
+    limit = getattr(model, "max_new_tokens", None)
+    tokenizer = getattr(getattr(model, "processor", None), "tokenizer", None)
+    if not limit or tokenizer is None or not text:
+        return False
+    try:
+        token_count = len(tokenizer(text, add_special_tokens=False)["input_ids"])
+    except Exception:
+        return False
+    return token_count >= limit - _TRUNCATION_MARGIN_TOKENS
+
+
+def _warn_if_truncated(model, text: str, start_s: float, label: str) -> None:
+    if _output_hit_token_limit(model, text):
+        logger.warning(
+            "%s (starting %.1fs) reached max_new_tokens=%s; "
+            "the end of this span may be missing from the transcript",
+            label,
+            start_s,
+            model.max_new_tokens,
+        )
+
+
 def _build_qwen3_model(model_name: str, device: str, word_timestamps: bool = True):
     """Instantiate a Qwen3ASRModel with optional ForcedAligner."""
     from qwen_asr import Qwen3ASRModel
@@ -114,7 +171,7 @@ def _build_qwen3_model(model_name: str, device: str, word_timestamps: bool = Tru
         "dtype": dtype,
         "device_map": device,
         "max_inference_batch_size": 32,
-        "max_new_tokens": 256,
+        "max_new_tokens": _max_new_tokens_for(word_timestamps),
     }
 
     # Attach forced aligner for word-level timestamps
@@ -162,6 +219,10 @@ def _parse_qwen3_result(result, time_offset: float = 0.0):
                 "probability": None,
             }
             all_words.append(w)
+
+        # The aligner strips punctuation; restore it from the ASR text so
+        # downstream segmentation can break at sentence / clause marks.
+        all_words = attach_punctuation(all_words, full_text)
 
         # Group into segments by punctuation boundaries (fine-grained, ~1-3s per segment)
         current_words = []
@@ -226,117 +287,12 @@ def _parse_qwen3_result(result, time_offset: float = 0.0):
 
 
 # ============================================================
-# Post-processing: pause-based re-segmentation
+# Post-processing: punctuation / pause / word-boundary re-segmentation
 # ============================================================
 
 
-def _merge_segments_by_pause(
-    segments_json,
-    words_data,
-    pause_threshold: float = 0.25,
-    max_duration: float = 5.0,
-    max_chars: int = 25,
-    soft_pause: float = 0.15,
-    soft_min_chars: int = 10,
-):
-    """
-    Re-segment words into natural phrase-level subtitle blocks using
-    speech pause detection from word-level timestamps.
-
-    Uses a two-tier break strategy to produce FunASR-like short phrases:
-
-      - **Soft break**: a small pause (≥ soft_pause) when enough text has
-        accumulated (≥ soft_min_chars).  This catches natural phrase
-        boundaries where the speaker takes a brief breath.
-      - **Hard break**: a clear pause (≥ pause_threshold), OR the segment
-        would exceed max_duration / max_chars.
-
-    Typical output: ~3-15 characters per segment, ~1-3 seconds each.
-
-    Args:
-        segments_json: List of segment dicts (each with a ``words`` list).
-        words_data:    Flat list of word dicts (will be rebuilt from result).
-        pause_threshold: Gap (seconds) that always triggers a break.
-        max_duration:  Hard maximum segment duration (seconds).
-        max_chars:     Hard maximum characters per segment.
-        soft_pause:    Smaller gap threshold used together with soft_min_chars.
-        soft_min_chars: Minimum accumulated chars before a soft_pause triggers a break.
-
-    Returns:
-        (new_segments, new_words) — re-segmented lists.
-    """
-    # Collect all words in chronological order
-    all_words = []
-    for seg in segments_json:
-        for w in seg.get("words", []):
-            all_words.append(w)
-
-    if len(all_words) < 2:
-        return segments_json, words_data
-
-    new_segments = []
-    current_words = [all_words[0]]
-
-    for i in range(1, len(all_words)):
-        prev_word = all_words[i - 1]
-        curr_word = all_words[i]
-
-        # Gap between end of previous word and start of current word
-        gap = curr_word["start"] - prev_word["end"]
-
-        # What the segment would look like if we appended curr_word
-        current_start = current_words[0]["start"]
-        potential_duration = curr_word["end"] - current_start
-        current_chars = sum(len(w["word"]) for w in current_words)
-        potential_chars = current_chars + len(curr_word["word"])
-
-        # Soft break: small pause + enough accumulated text → natural phrase boundary
-        soft_break = gap >= soft_pause and current_chars >= soft_min_chars
-
-        # Hard break: clear pause, or would exceed hard limits
-        hard_break = (
-            gap >= pause_threshold
-            or potential_duration > max_duration
-            or potential_chars > max_chars
-        )
-
-        if soft_break or hard_break:
-            # Finalize current segment
-            text = _smart_strip_punctuation(_join_words_text(current_words))
-            new_segments.append(
-                {
-                    "id": len(new_segments),
-                    "start": current_words[0]["start"],
-                    "end": current_words[-1]["end"],
-                    "text": text,
-                    "confidence": None,
-                    "words": list(current_words),
-                }
-            )
-            current_words = [curr_word]
-        else:
-            current_words.append(curr_word)
-
-    # Flush remaining words
-    if current_words:
-        text = _smart_strip_punctuation(_join_words_text(current_words))
-        new_segments.append(
-            {
-                "id": len(new_segments),
-                "start": current_words[0]["start"],
-                "end": current_words[-1]["end"],
-                "text": text,
-                "confidence": None,
-                "words": list(current_words),
-            }
-        )
-
-    # Rebuild flat words list from new segments
-    new_words = []
-    for seg in new_segments:
-        new_words.extend(seg.get("words", []))
-
-    return new_segments, new_words
+def _postprocess_segments(segments_json, words_data, glossary=None):
+    return postprocess_segments(segments_json, words_data, glossary=glossary)
 
 
 # ============================================================
@@ -473,6 +429,10 @@ def transcribe_audio(
             mode = "VAD 語音邊界" if used_vad else "固定間隔"
             print(f"共分割為 {len(segment_files)} 個片段（{mode}）")
 
+        single_generate_per_segment = segment_duration <= _max_chunk_seconds(
+            word_timestamps
+        )
+
         segments_txt_path = base_output_path / f"{base_filename}_segments.txt"
         with open(segments_txt_path, "w", encoding="utf-8") as segments_file:
             total_segs = len(segment_files)
@@ -505,6 +465,10 @@ def transcribe_audio(
                 time_offset = segment_offset
 
                 for r in result_list:
+                    if single_generate_per_segment:
+                        _warn_if_truncated(
+                            model, r.text, time_offset, f"片段 {i + 1}/{total_segs}"
+                        )
                     seg_segments, seg_words, seg_text, seg_lang = _parse_qwen3_result(
                         r,
                         time_offset=time_offset,
@@ -513,25 +477,8 @@ def transcribe_audio(
                     if seg_lang:
                         detected_language = detected_language or seg_lang
 
-                    # Post-processing: split overly long segments
-                    seg_segments, seg_words = _split_long_segments(
-                        seg_segments, seg_words, max_duration=5.0
-                    )
-
-                    # Post-processing: Simplified → Traditional Chinese (Taiwan)
-                    for seg in seg_segments:
-                        seg["text"] = _convert_to_traditional(seg["text"])
-                        for w in seg.get("words", []):
-                            w["word"] = _convert_to_traditional(w["word"])
-                    for w in seg_words:
-                        w["word"] = _convert_to_traditional(w["word"])
-
-                    for seg in seg_segments:
-                        seg["text"] = _smart_strip_punctuation(seg["text"])
-
-                    # Post-processing: merge short segments into natural sentences
-                    seg_segments, seg_words = _merge_segments_by_pause(
-                        seg_segments, seg_words
+                    seg_segments, seg_words = _postprocess_segments(
+                        seg_segments, seg_words, glossary=hotwords
                     )
 
                     # Accumulate segments with corrected IDs
@@ -649,25 +596,9 @@ def transcribe_audio(
             if det_lang:
                 detected_language = detected_language or det_lang
 
-            # Post-processing: split overly long segments
-            seg_segments, seg_words = _split_long_segments(
-                seg_segments, seg_words, max_duration=5.0
+            seg_segments, seg_words = _postprocess_segments(
+                seg_segments, seg_words, glossary=hotwords
             )
-
-            # Post-processing: Simplified → Traditional Chinese (Taiwan)
-            for seg in seg_segments:
-                seg["text"] = _convert_to_traditional(seg["text"])
-                for w in seg.get("words", []):
-                    w["word"] = _convert_to_traditional(w["word"])
-            for w in seg_words:
-                w["word"] = _convert_to_traditional(w["word"])
-
-            for seg in seg_segments:
-                seg["text"] = _smart_strip_punctuation(seg["text"])
-
-            # Post-processing: merge short segments into natural sentences
-            # by detecting speech pauses in word-level timestamps
-            seg_segments, seg_words = _merge_segments_by_pause(seg_segments, seg_words)
 
             segments_json.extend(seg_segments)
             words_data.extend(seg_words)

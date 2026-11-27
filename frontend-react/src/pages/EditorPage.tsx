@@ -12,6 +12,7 @@ import { VideoPlayer, type VideoPlayerHandle } from '@/components/editor/VideoPl
 import { ExportDialog } from '@/components/editor/ExportDialog'
 import { LlmEnhanceDialog } from '@/components/editor/LlmEnhanceDialog'
 import { GenerateNotesDialog } from '@/components/editor/GenerateNotesDialog'
+import { ResegmentDialog } from '@/components/editor/ResegmentDialog'
 import { MindmapPanel } from '@/components/editor/MindmapPanel'
 import { useSubtitles, useSaveSubtitles } from '@/hooks/use-subtitles'
 import { useTask } from '@/hooks/use-task'
@@ -50,6 +51,7 @@ export function EditorPage() {
   const [exportOpen, setExportOpen] = useState(false)
   const [enhanceOpen, setEnhanceOpen] = useState(false)
   const [notesOpen, setNotesOpen] = useState(false)
+  const [resegmentOpen, setResegmentOpen] = useState(false)
   const [videoTime, setVideoTime] = useState(0)
   const videoRef = useRef<VideoPlayerHandle>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -292,6 +294,7 @@ export function EditorPage() {
             onExport={() => setExportOpen(true)}
             onEnhance={() => setEnhanceOpen(true)}
             onGenerateNotes={() => setNotesOpen(true)}
+            onResegment={() => setResegmentOpen(true)}
             onImport={replaceSubtitles}
             saving={saveMutation.isPending}
             disabled={isStreaming}
@@ -340,6 +343,12 @@ export function EditorPage() {
         onClose={() => setNotesOpen(false)}
         taskId={taskId}
         hasSubtitles={subtitles.length > 0}
+      />
+      <ResegmentDialog
+        open={resegmentOpen}
+        onClose={() => setResegmentOpen(false)}
+        taskId={taskId}
+        onResegmented={replaceSubtitles}
       />
       {shortcutsOpen && (
         <div

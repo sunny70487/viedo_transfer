@@ -23,6 +23,10 @@ pywin32>=305; platform_system=="Windows"
 funasr>=1.0.0
 modelscope>=1.9.0
 qwen-asr>=0.0.6
+# 字幕斷句：中文分詞，避免斷在詞中間（funasr 亦間接依賴）
+jieba>=0.42.1
+# 術語表同音校正（拼音 + 聲調比對）
+pypinyin>=0.51.0
 # torch / torchaudio: Docker 內由 Dockerfile 單獨安裝 CUDA 版本
 torch>=2.0.0
 torchaudio>=2.0.0

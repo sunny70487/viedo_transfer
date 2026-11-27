@@ -284,8 +284,9 @@ def _apply_llm_enhancement(
     request: TranscriptionRequest,
     status_callback,
 ):
-    """Read the JSON output, merge short segments, enhance with LLM, and rewrite all output files."""
+    """Read the JSON output, re-break lines and enhance with LLM, rewrite outputs."""
     from backend.shared.llm_postprocess import enhance_subtitles, merge_short_segments, resplit_long_segments
+    from backend.shared.llm_segmentation import resegment_subtitles
     from backend.shared.transcription_pipeline import (
         build_srt_entry,
         build_vtt_entry,
@@ -302,6 +303,17 @@ def _apply_llm_enhancement(
     segments = data.get("segments", [])
     if not segments:
         return
+
+    # Semantic line breaks first (LLM picks boundaries, timing stays from the
+    # aligner); the correction pass below keeps this line count.
+    segments = resegment_subtitles(
+        segments,
+        api_key=request.llm_api_key,
+        base_url=request.llm_base_url,
+        model=request.llm_model,
+        content_hint=request.llm_content_hint,
+        status_callback=status_callback,
+    )
 
     orig_count = len(segments)
     segments = merge_short_segments(segments)

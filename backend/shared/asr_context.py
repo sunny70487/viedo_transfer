@@ -9,6 +9,8 @@ Windows reverse-engineering lecture, term accuracy went from 46.7% to 100%
 FireRedASR2-AED has no equivalent, so this is Qwen3-ASR specific.
 """
 
+from backend.shared.glossary import CORRECTION_SEPARATOR
+
 DEFAULT_MAX_CHARS = 8000
 
 _SEPARATOR = ", "
@@ -27,7 +29,8 @@ def _normalize_hotwords(hotwords):
     for item in raw:
         if not isinstance(item, str):
             continue
-        term = item.strip()
+        # "wrong=>right" glossary corrections: only the right spelling biases ASR.
+        term = item.split(CORRECTION_SEPARATOR)[-1].strip()
         if not term:
             continue
         key = term.casefold()

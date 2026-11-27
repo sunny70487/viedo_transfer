@@ -5,9 +5,9 @@ import { ChevronDown, CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { api } from '@/api/client'
 import type { LlmModel } from '@/types/api'
+import { loadBiasSettings, saveBiasSettings, type BiasSettings } from '@/lib/asr-bias'
 
 const LLM_STORAGE_KEY = 'whisper_llm_settings'
-const BIAS_STORAGE_KEY = 'whisper_asr_bias'
 
 interface LlmSettings {
   llm_enhance: string
@@ -15,25 +15,6 @@ interface LlmSettings {
   llm_base_url: string
   llm_model: string
   llm_content_hint: string
-}
-
-interface BiasSettings {
-  hotwords: string
-  context: string
-}
-
-function loadBiasSettings(): BiasSettings {
-  try {
-    const raw = localStorage.getItem(BIAS_STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as BiasSettings
-  } catch { /* ignore */ }
-  return { hotwords: '', context: '' }
-}
-
-function saveBiasSettings(s: BiasSettings) {
-  try {
-    localStorage.setItem(BIAS_STORAGE_KEY, JSON.stringify(s))
-  } catch { /* ignore */ }
 }
 
 function loadLlmSettings(): LlmSettings {
@@ -192,10 +173,14 @@ export function TranscriptionOptions({ values, onChange }: Readonly<Transcriptio
             id="hotwords"
             className="w-full rounded-lg border border-border dark:border-border-dark bg-surface dark:bg-surface-dark px-3 py-2 text-sm text-text dark:text-text-dark placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-primary/40 resize-y min-h-[60px]"
             rows={3}
-            placeholder={'一行一個，或用逗號分隔\nshellcode\nVirtualAlloc\nKubernetes'}
+            placeholder={'一行一個，或用逗號分隔\nshellcode\n線程環境塊\nO牛debug=>OllyDbg'}
             value={bias.hotwords}
             onChange={(e) => updateBias('hotwords', e.target.value)}
           />
+          <p className="text-xs text-muted dark:text-muted-dark mt-1">
+            術語不會被拆到兩行字幕；同音字會自動修正成術語。
+            固定聽錯的寫法可用「錯字=&gt;正確」直接替換。
+          </p>
           {termCount > 0 && (
             <p className="text-xs text-muted dark:text-muted-dark mt-1">
               已設定 {termCount} 個術語（會記住，下次自動帶入）

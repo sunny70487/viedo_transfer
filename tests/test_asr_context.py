@@ -61,6 +61,12 @@ def test_build_asr_context_truncation_does_not_cut_mid_term():
         assert piece in ("alpha", "beta", "gamma")
 
 
+def test_build_asr_context_sends_only_correct_side_of_corrections():
+    result = build_asr_context(hotwords="O牛debug=>OllyDbg\nIDA")
+
+    assert result == "OllyDbg, IDA"
+
+
 def test_build_asr_context_ignores_non_string_hotwords():
     result = build_asr_context(hotwords=["IDA", None, 42, "PE"])
 
